@@ -7,12 +7,18 @@ export function Usuarios() {
   const [roles, setRoles] = useState<any[]>([]);
   const [mensaje, setMensaje] = useState('');
   const [nuevo, setNuevo] = useState({ nombre: '', email: '', password: '', rolId: '' });
+  const [error, setError] = useState('');
 
   function cargarUsuarios() {
-    api.get('/usuarios').then((res) => setUsuarios(res.data));
+    setError('');
+    api.get('/usuarios')
+      .then((res) => setUsuarios(res.data))
+      .catch((err) => setError(err.response?.data?.error || 'No se pudieron cargar los usuarios'));
   }
   function cargarRoles() {
-    api.get('/usuarios/roles').then((res) => setRoles(res.data));
+    api.get('/usuarios/roles')
+      .then((res) => setRoles(res.data))
+      .catch((err) => setError(err.response?.data?.error || 'No se pudieron cargar los roles'));
   }
 
   useEffect(() => {
@@ -33,8 +39,13 @@ export function Usuarios() {
   }
 
   async function cambiarPermiso(rolId: number, pantallaId: number, campo: string, valor: boolean) {
-    await api.patch(`/usuarios/roles/${rolId}/pantallas/${pantallaId}`, { [campo]: valor });
-    cargarRoles();
+    setError('');
+    try {
+      await api.patch(`/usuarios/roles/${rolId}/pantallas/${pantallaId}`, { [campo]: valor });
+      cargarRoles();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'No se pudo actualizar el permiso');
+    }
   }
 
   return (
@@ -58,6 +69,7 @@ export function Usuarios() {
       </div>
 
       {mensaje && <p className="text-sm text-brand-700 mb-4">{mensaje}</p>}
+      {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
 
       {tab === 'usuarios' && (
         <div className="space-y-4">

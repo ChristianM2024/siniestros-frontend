@@ -21,15 +21,26 @@ const TARJETAS: { key: keyof Kpis; label: string; color: string }[] = [
 
 export function Dashboard() {
   const [kpis, setKpis] = useState<Kpis | null>(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    api.get('/dashboard').then((res) => setKpis(res.data));
+    setError('');
+    api
+      .get('/dashboard')
+      .then((res) => setKpis(res.data))
+      .catch(() => setError('No se pudieron cargar los indicadores del panel.'));
   }, []);
 
   return (
     <div>
       <h1 className="text-xl font-semibold mb-1">Panel de Control General</h1>
       <p className="text-sm text-slate-500 mb-6">Vista general del sistema de siniestros</p>
+
+      {error && (
+        <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          {error}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {TARJETAS.map((t) => (
