@@ -157,7 +157,7 @@ export function ReportarSiniestro() {
               <CampoVehiculo label="Marca" value={vehiculo.marca} />
               <CampoVehiculo label="Modelo" value={vehiculo.modelo} />
               <CampoVehiculo label="Anio" value={vehiculo.anio} />
-              <CampoVehiculo label="Cliente" value={vehiculo.cliente} />
+              <CampoVehiculo label="Cliente" value={vehiculo.cliente?.nombre} />
               <CampoVehiculo label="No. Contrato" value={vehiculo.noContrato} />
               <CampoVehiculo label="Chasis" value={vehiculo.chasis} />
               <CampoVehiculo label="No. Motor" value={vehiculo.noMotor} />

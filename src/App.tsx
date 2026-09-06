@@ -9,6 +9,10 @@ import { Seguimiento } from './pages/Seguimiento';
 import { BaseDatos } from './pages/BaseDatos';
 import { Vehiculos } from './pages/Vehiculos';
 import { Usuarios } from './pages/Usuarios';
+import { Auditoria } from './pages/Auditoria';
+import EnvioFormulario from './pages/EnvioFormulario';
+import ReportarSiniestroPublico from './pages/ReportarSiniestroPublico';
+import Mantenimiento from './pages/Mantenimiento';
 
 export default function App() {
   return (
@@ -16,6 +20,9 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+
+          {/* Público: el cliente final llena su reporte aquí, sin login */}
+          <Route path="/reportar-siniestro/:token" element={<ReportarSiniestroPublico />} />
 
           <Route
             element={
@@ -26,10 +33,15 @@ export default function App() {
           >
             <Route path="/" element={<ProtectedRoute pantalla="dashboard"><Dashboard /></ProtectedRoute>} />
             <Route path="/siniestros/nuevo" element={<ProtectedRoute pantalla="reportar_siniestro"><ReportarSiniestro /></ProtectedRoute>} />
+            <Route path="/siniestros/envio-formulario" element={<ProtectedRoute pantalla="envio_formulario"><EnvioFormulario /></ProtectedRoute>} />
             <Route path="/siniestros/seguimiento" element={<ProtectedRoute pantalla="seguimiento"><Seguimiento /></ProtectedRoute>} />
             <Route path="/siniestros" element={<ProtectedRoute pantalla="base_datos"><BaseDatos /></ProtectedRoute>} />
+            <Route path="/siniestros/mantenimiento" element={<ProtectedRoute pantalla="mantenimiento"><Mantenimiento /></ProtectedRoute>} />
             <Route path="/vehiculos" element={<ProtectedRoute pantalla="vehiculos"><Vehiculos /></ProtectedRoute>} />
-            <Route path="/usuarios" element={<ProtectedRoute pantalla="usuarios"><Usuarios /></ProtectedRoute>} />
+            {/* Antes: "/usuarios" — no coincidía con pantalla.ruta = "/admin/usuarios" que arma el sidebar */}
+            <Route path="/admin/usuarios" element={<ProtectedRoute pantalla="usuarios"><Usuarios /></ProtectedRoute>} />
+            {/* Antes: no existía ninguna <Route> para auditoria */}
+            <Route path="/admin/auditoria" element={<ProtectedRoute pantalla="auditoria"><Auditoria /></ProtectedRoute>} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

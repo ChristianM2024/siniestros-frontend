@@ -11,6 +11,11 @@ interface Aseguradora {
   nombre: string;
 }
 
+interface Cliente {
+  id: number;
+  nombre: string;
+}
+
 export interface Vehiculo {
   id?: number;
   placa: string;
@@ -20,7 +25,7 @@ export interface Vehiculo {
   color?: string | null;
   chasis?: string | null;
   noMotor?: string | null;
-  cliente: string;
+  clienteId?: number | null;
   noContrato?: string | null;
   ciudadId?: number | null;
   aseguradoraId?: number | null;
@@ -44,7 +49,7 @@ const VACIO: Vehiculo = {
   color: '',
   chasis: '',
   noMotor: '',
-  cliente: '',
+  clienteId: undefined,
   noContrato: '',
   ciudadId: undefined,
   aseguradoraId: undefined,
@@ -57,6 +62,7 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
   const [form, setForm] = useState<Vehiculo>(VACIO);
   const [ciudades, setCiudades] = useState<Ciudad[]>([]);
   const [aseguradoras, setAseguradoras] = useState<Aseguradora[]>([]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [errorGeneral, setErrorGeneral] = useState('');
@@ -75,6 +81,10 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
       .get('/aseguradoras')
       .then((res) => setAseguradoras(res.data))
       .catch(() => setAseguradoras([]));
+    api
+      .get('/clientes')
+      .then((res) => setClientes(res.data))
+      .catch(() => setClientes([]));
   }, [open, vehiculo]);
 
   if (!open) return null;
@@ -93,6 +103,7 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
       ...form,
       placa: form.placa.trim().toUpperCase(),
       anio: form.anio ? Number(form.anio) : undefined,
+      clienteId: form.clienteId ? Number(form.clienteId) : undefined,
       ciudadId: form.ciudadId ? Number(form.ciudadId) : undefined,
       aseguradoraId: form.aseguradoraId ? Number(form.aseguradoraId) : undefined,
       vencimientoPoliza: form.vencimientoPoliza || undefined,
@@ -161,13 +172,22 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
                   required
                 />
               </Campo>
-              <Campo label="Cliente" required error={errores.cliente}>
-                <input
+              <Campo label="Cliente" required error={errores.clienteId}>
+                <select
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-                  value={form.cliente}
-                  onChange={(e) => actualizar('cliente', e.target.value)}
+                  value={form.clienteId ?? ''}
+                  onChange={(e) =>
+                    actualizar('clienteId', e.target.value ? Number(e.target.value) : undefined)
+                  }
                   required
-                />
+                >
+                  <option value="">— Seleccionar cliente —</option>
+                  {clientes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
               </Campo>
               <Campo label="Marca" required error={errores.marca}>
                 <input

@@ -21,3 +21,10 @@ api.interceptors.response.use(
     return Promise.reject(err);
   }
 );
+
+// Cliente para el formulario público (sin token, sin redirect a /login):
+// lo usa el cliente final en /reportar-siniestro/:token, que nunca está autenticado,
+// así que no debe llevar Authorization ni disparar el interceptor de 401 de arriba.
+export const apiPublico = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000/api',
+});

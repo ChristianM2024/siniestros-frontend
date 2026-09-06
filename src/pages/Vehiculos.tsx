@@ -109,7 +109,7 @@ export function Vehiculos() {
                   <td className="px-3 py-2 font-medium">{v.placa}</td>
                   <td className="px-3 py-2">{v.marca}</td>
                   <td className="px-3 py-2">{v.modelo}</td>
-                  <td className="px-3 py-2">{v.cliente}</td>
+                  <td className="px-3 py-2">{v.cliente?.nombre ?? '-'}</td>
                   <td className="px-3 py-2">{v.ciudad?.nombre ?? '-'}</td>
                   <td className="px-3 py-2">
                     <span
