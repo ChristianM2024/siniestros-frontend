@@ -16,6 +16,18 @@ interface Cliente {
   nombre: string;
 }
 
+// Los 8 catálogos "simples" (solo id + nombre) tienen la misma forma.
+interface CatalogoSimple {
+  id: number;
+  nombre: string;
+}
+
+interface Gama {
+  id: number;
+  nombre: string;
+  claseId: number;
+}
+
 export interface Vehiculo {
   id?: number;
   placa: string;
@@ -32,6 +44,29 @@ export interface Vehiculo {
   noPoliza?: string | null;
   vencimientoPoliza?: string | null; // yyyy-mm-dd para <input type="date">
   estado?: string;
+
+  // --- NUEVO: datos de contrato/cotización ---
+  noAnexo?: string | null;
+  noCotizacion?: string | null;
+  noFactura?: string | null;
+  fechaInicioContrato?: string | null; // yyyy-mm-dd
+  fechaFinContrato?: string | null; // yyyy-mm-dd
+  kmAnualContratado?: number | null;
+
+  // --- NUEVO: catálogos ---
+  administradorId?: number | null;
+  gerenteCuentaId?: number | null;
+  tipoActivoId?: number | null;
+  tipoCombustibleId?: number | null;
+  claseId?: number | null;
+  gamaId?: number | null;
+  proveedorCompraId?: number | null;
+  tipoOperacionId?: number | null;
+  nivelBlindajeId?: number | null;
+
+  // --- NUEVO: banderas ---
+  blindaje?: boolean;
+  sustituto?: boolean;
 }
 
 interface Props {
@@ -56,13 +91,52 @@ const VACIO: Vehiculo = {
   noPoliza: '',
   vencimientoPoliza: '',
   estado: 'Activo',
+
+  noAnexo: '',
+  noCotizacion: '',
+  noFactura: '',
+  fechaInicioContrato: '',
+  fechaFinContrato: '',
+  kmAnualContratado: undefined,
+
+  administradorId: undefined,
+  gerenteCuentaId: undefined,
+  tipoActivoId: undefined,
+  tipoCombustibleId: undefined,
+  claseId: undefined,
+  gamaId: undefined,
+  proveedorCompraId: undefined,
+  tipoOperacionId: undefined,
+  nivelBlindajeId: undefined,
+
+  blindaje: false,
+  sustituto: false,
 };
+
+// Las fechas que vienen del backend llegan como ISO completo (con hora);
+// para <input type="date"> hay que recortarlas a yyyy-mm-dd, igual que
+// ya se hacía con vencimientoPoliza en Vehiculos.tsx.
+function aFechaInput(v: string | null | undefined): string {
+  return v ? String(v).slice(0, 10) : '';
+}
 
 export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
   const [form, setForm] = useState<Vehiculo>(VACIO);
+
   const [ciudades, setCiudades] = useState<Ciudad[]>([]);
   const [aseguradoras, setAseguradoras] = useState<Aseguradora[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
+
+  const [administradores, setAdministradores] = useState<CatalogoSimple[]>([]);
+  const [gerentesCuenta, setGerentesCuenta] = useState<CatalogoSimple[]>([]);
+  const [tiposActivo, setTiposActivo] = useState<CatalogoSimple[]>([]);
+  const [tiposCombustible, setTiposCombustible] = useState<CatalogoSimple[]>([]);
+  const [clases, setClases] = useState<CatalogoSimple[]>([]);
+  const [gamas, setGamas] = useState<Gama[]>([]);
+  const [proveedoresCompra, setProveedoresCompra] = useState<CatalogoSimple[]>([]);
+  const [tiposOperacion, setTiposOperacion] = useState<CatalogoSimple[]>([]);
+  const [nivelesBlindaje, setNivelesBlindaje] = useState<CatalogoSimple[]>([]);
+
   const [guardando, setGuardando] = useState(false);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [errorGeneral, setErrorGeneral] = useState('');
@@ -71,20 +145,34 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    setForm(vehiculo ? { ...VACIO, ...vehiculo } : VACIO);
+    setForm(
+      vehiculo
+        ? {
+            ...VACIO,
+            ...vehiculo,
+            vencimientoPoliza: aFechaInput(vehiculo.vencimientoPoliza),
+            fechaInicioContrato: aFechaInput(vehiculo.fechaInicioContrato),
+            fechaFinContrato: aFechaInput(vehiculo.fechaFinContrato),
+          }
+        : VACIO
+    );
     setErrores({});
     setErrorGeneral('');
 
     // Catálogos para los selects. Si tus endpoints tienen otro nombre, ajusta aquí.
     api.get('/ciudades').then((res) => setCiudades(res.data)).catch(() => setCiudades([]));
-    api
-      .get('/aseguradoras')
-      .then((res) => setAseguradoras(res.data))
-      .catch(() => setAseguradoras([]));
-    api
-      .get('/clientes')
-      .then((res) => setClientes(res.data))
-      .catch(() => setClientes([]));
+    api.get('/aseguradoras').then((res) => setAseguradoras(res.data)).catch(() => setAseguradoras([]));
+    api.get('/clientes').then((res) => setClientes(res.data)).catch(() => setClientes([]));
+
+    api.get('/administradores').then((res) => setAdministradores(res.data)).catch(() => setAdministradores([]));
+    api.get('/gerentes-cuenta').then((res) => setGerentesCuenta(res.data)).catch(() => setGerentesCuenta([]));
+    api.get('/tipos-activo').then((res) => setTiposActivo(res.data)).catch(() => setTiposActivo([]));
+    api.get('/tipos-combustible').then((res) => setTiposCombustible(res.data)).catch(() => setTiposCombustible([]));
+    api.get('/clases').then((res) => setClases(res.data)).catch(() => setClases([]));
+    api.get('/gamas').then((res) => setGamas(res.data)).catch(() => setGamas([]));
+    api.get('/proveedores-compra').then((res) => setProveedoresCompra(res.data)).catch(() => setProveedoresCompra([]));
+    api.get('/tipos-operacion').then((res) => setTiposOperacion(res.data)).catch(() => setTiposOperacion([]));
+    api.get('/niveles-blindaje').then((res) => setNivelesBlindaje(res.data)).catch(() => setNivelesBlindaje([]));
   }, [open, vehiculo]);
 
   if (!open) return null;
@@ -92,6 +180,15 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
   function actualizar<K extends keyof Vehiculo>(campo: K, valor: Vehiculo[K]) {
     setForm((prev) => ({ ...prev, [campo]: valor }));
   }
+
+  // Al cambiar la clase, la gama elegida deja de ser válida si pertenecía a otra clase.
+  function actualizarClase(claseId: number | undefined) {
+    setForm((prev) => ({ ...prev, claseId, gamaId: undefined }));
+  }
+
+  const gamasDeClaseSeleccionada = form.claseId
+    ? gamas.filter((g) => g.claseId === form.claseId)
+    : [];
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
@@ -107,6 +204,21 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
       ciudadId: form.ciudadId ? Number(form.ciudadId) : undefined,
       aseguradoraId: form.aseguradoraId ? Number(form.aseguradoraId) : undefined,
       vencimientoPoliza: form.vencimientoPoliza || undefined,
+
+      kmAnualContratado: form.kmAnualContratado ? Number(form.kmAnualContratado) : undefined,
+      fechaInicioContrato: form.fechaInicioContrato || undefined,
+      fechaFinContrato: form.fechaFinContrato || undefined,
+
+      administradorId: form.administradorId ? Number(form.administradorId) : undefined,
+      gerenteCuentaId: form.gerenteCuentaId ? Number(form.gerenteCuentaId) : undefined,
+      tipoActivoId: form.tipoActivoId ? Number(form.tipoActivoId) : undefined,
+      tipoCombustibleId: form.tipoCombustibleId ? Number(form.tipoCombustibleId) : undefined,
+      claseId: form.claseId ? Number(form.claseId) : undefined,
+      gamaId: form.gamaId ? Number(form.gamaId) : undefined,
+      proveedorCompraId: form.proveedorCompraId ? Number(form.proveedorCompraId) : undefined,
+      tipoOperacionId: form.tipoOperacionId ? Number(form.tipoOperacionId) : undefined,
+      // si desmarcan blindaje, no tiene sentido conservar el nivel
+      nivelBlindajeId: form.blindaje && form.nivelBlindajeId ? Number(form.nivelBlindajeId) : undefined,
     };
 
     try {
@@ -264,6 +376,254 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
                   {ciudades.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo label="Tipo de combustible">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.tipoCombustibleId ?? ''}
+                  onChange={(e) =>
+                    actualizar('tipoCombustibleId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                >
+                  <option value="">— Sin especificar —</option>
+                  {tiposCombustible.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+              Clasificación
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Campo label="Clase">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.claseId ?? ''}
+                  onChange={(e) => actualizarClase(e.target.value ? Number(e.target.value) : undefined)}
+                >
+                  <option value="">— Sin especificar —</option>
+                  {clases.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo label="Gama">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400"
+                  value={form.gamaId ?? ''}
+                  onChange={(e) => actualizar('gamaId', e.target.value ? Number(e.target.value) : undefined)}
+                  disabled={!form.claseId}
+                >
+                  <option value="">
+                    {form.claseId ? '— Sin especificar —' : 'Elige primero una clase'}
+                  </option>
+                  {gamasDeClaseSeleccionada.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo label="Tipo de activo">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.tipoActivoId ?? ''}
+                  onChange={(e) =>
+                    actualizar('tipoActivoId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                >
+                  <option value="">— Sin especificar —</option>
+                  {tiposActivo.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo label="Tipo de operación">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.tipoOperacionId ?? ''}
+                  onChange={(e) =>
+                    actualizar('tipoOperacionId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                >
+                  <option value="">— Sin especificar —</option>
+                  {tiposOperacion.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+              Blindaje
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={Boolean(form.blindaje)}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      blindaje: e.target.checked,
+                      nivelBlindajeId: e.target.checked ? prev.nivelBlindajeId : undefined,
+                    }))
+                  }
+                />
+                Vehículo blindado
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={Boolean(form.sustituto)}
+                  onChange={(e) => actualizar('sustituto', e.target.checked)}
+                />
+                Es vehículo sustituto
+              </label>
+              <Campo label="Nivel de blindaje">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-400"
+                  value={form.nivelBlindajeId ?? ''}
+                  onChange={(e) =>
+                    actualizar('nivelBlindajeId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                  disabled={!form.blindaje}
+                >
+                  <option value="">{form.blindaje ? '— Sin especificar —' : 'N/A'}</option>
+                  {nivelesBlindaje.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+              Contrato y compra
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Campo label="No. de anexo">
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.noAnexo ?? ''}
+                  onChange={(e) => actualizar('noAnexo', e.target.value)}
+                />
+              </Campo>
+              <Campo label="No. de cotización">
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.noCotizacion ?? ''}
+                  onChange={(e) => actualizar('noCotizacion', e.target.value)}
+                />
+              </Campo>
+              <Campo label="No. de factura">
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.noFactura ?? ''}
+                  onChange={(e) => actualizar('noFactura', e.target.value)}
+                />
+              </Campo>
+              <Campo label="Km anual contratado">
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  type="number"
+                  value={form.kmAnualContratado ?? ''}
+                  onChange={(e) =>
+                    actualizar('kmAnualContratado', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                  placeholder="20000"
+                />
+              </Campo>
+              <Campo label="Fecha inicio de contrato">
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  type="date"
+                  value={form.fechaInicioContrato ?? ''}
+                  onChange={(e) => actualizar('fechaInicioContrato', e.target.value)}
+                />
+              </Campo>
+              <Campo label="Fecha fin de contrato">
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  type="date"
+                  value={form.fechaFinContrato ?? ''}
+                  onChange={(e) => actualizar('fechaFinContrato', e.target.value)}
+                />
+              </Campo>
+              <Campo label="Proveedor de compra">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.proveedorCompraId ?? ''}
+                  onChange={(e) =>
+                    actualizar('proveedorCompraId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                >
+                  <option value="">— Sin especificar —</option>
+                  {proveedoresCompra.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+              Gestión
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Campo label="Administrador">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.administradorId ?? ''}
+                  onChange={(e) =>
+                    actualizar('administradorId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                >
+                  <option value="">— Sin especificar —</option>
+                  {administradores.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo label="Gerente de cuenta">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.gerenteCuentaId ?? ''}
+                  onChange={(e) =>
+                    actualizar('gerenteCuentaId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                >
+                  <option value="">— Sin especificar —</option>
+                  {gerentesCuenta.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.nombre}
                     </option>
                   ))}
                 </select>
