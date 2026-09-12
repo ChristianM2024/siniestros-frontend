@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import {
   Plus, Pencil, Trash2, X, AlertCircle, Building2, Users,
   UserCog, Briefcase, Tag, Fuel, Layers, LayoutGrid, Truck, ShieldAlert, Shield,
+  ListChecks,
 } from 'lucide-react';
 import { api } from '../api/client';
 
@@ -41,14 +42,23 @@ interface Gama {
   _count: { vehiculos: number };
 }
 
+interface TipoSiniestro {
+  id: number;
+  codigo: string;
+  nombre: string;
+  estado: boolean;
+  _count: { siniestros: number };
+}
+
 type Tab =
   | 'clientes' | 'aseguradoras'
   | 'administradores' | 'gerentesCuenta' | 'tiposActivo' | 'tiposCombustible'
-  | 'clases' | 'gamas' | 'proveedoresCompra' | 'tiposOperacion' | 'nivelesBlindaje';
+  | 'clases' | 'gamas' | 'proveedoresCompra' | 'tiposOperacion' | 'nivelesBlindaje'
+  | 'tiposSiniestro';
 
 // Config de cada catálogo simple: ruta de API, etiquetas y en qué tab vive.
 const CATALOGOS_SIMPLES: Record<
-  Exclude<Tab, 'clientes' | 'aseguradoras' | 'gamas'>,
+  Exclude<Tab, 'clientes' | 'aseguradoras' | 'gamas' | 'tiposSiniestro'>,
   { apiPath: string; titulo: string; singular: string; icono: any }
 > = {
   administradores:   { apiPath: '/administradores',     titulo: 'Administradores',      singular: 'administrador',       icono: UserCog },
@@ -73,6 +83,7 @@ const TABS: { id: Tab; label: string; icono: any }[] = [
   { id: 'proveedoresCompra', label: 'Proveedores de Compra', icono: Truck },
   { id: 'tiposOperacion', label: 'Tipos de Operación', icono: LayoutGrid },
   { id: 'nivelesBlindaje', label: 'Niveles de Blindaje', icono: Shield },
+  { id: 'tiposSiniestro', label: 'Tipos de Siniestro', icono: ListChecks },  // <-- NUEVO
 ];
 
 export default function Mantenimiento() {
@@ -102,8 +113,9 @@ export default function Mantenimiento() {
       {tab === 'clientes' && <TabClientes />}
       {tab === 'aseguradoras' && <TabAseguradoras />}
       {tab === 'gamas' && <TabGamas />}
-      {tab !== 'clientes' && tab !== 'aseguradoras' && tab !== 'gamas' && (
-        <TabCatalogoSimple config={CATALOGOS_SIMPLES[tab]} />
+      {tab === 'tiposSiniestro' && <TabTiposSiniestro />}   {/* <-- NUEVO */}
+      {tab !== 'clientes' && tab !== 'aseguradoras' && tab !== 'gamas' && tab !== 'tiposSiniestro' && (
+        <TabCatalogoSimple config={CATALOGOS_SIMPLES[tab as Exclude<Tab, 'clientes' | 'aseguradoras' | 'gamas' | 'tiposSiniestro'>]} />
       )}
     </div>
   );
@@ -453,6 +465,206 @@ function ModalGama({
               required
             />
           </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onCerrar} className="flex-1 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Cancelar
+            </button>
+            <button type="submit" className="flex-1 py-2.5 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800">
+              Guardar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// TIPOS DE SINIESTRO (código + nombre + estado — no usa el genérico)
+// ============================================================
+
+function TabTiposSiniestro() {
+  const [items, setItems] = useState<TipoSiniestro[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [editando, setEditando] = useState<TipoSiniestro | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function cargar() {
+    setCargando(true);
+    try {
+      const { data } = await api.get<TipoSiniestro[]>('/tipos-siniestro');
+      setItems(data);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  useEffect(() => { cargar(); }, []);
+
+  function abrirNuevo() {
+    setEditando(null);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  function abrirEditar(item: TipoSiniestro) {
+    setEditando(item);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  async function guardar(datos: { codigo: string; nombre: string; estado: boolean }) {
+    setError(null);
+    try {
+      if (editando) {
+        await api.put(`/tipos-siniestro/${editando.id}`, datos);
+      } else {
+        await api.post('/tipos-siniestro', datos);
+      }
+      setModalAbierto(false);
+      cargar();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'No se pudo guardar el tipo de siniestro.');
+    }
+  }
+
+  async function eliminar(item: TipoSiniestro) {
+    if (!confirm(`¿Eliminar "${item.nombre}"?`)) return;
+    try {
+      await api.delete(`/tipos-siniestro/${item.id}`);
+      cargar();
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo eliminar el tipo de siniestro.');
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex justify-end mb-4">
+        <button
+          onClick={abrirNuevo}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800"
+        >
+          <Plus className="w-4 h-4" /> Nuevo tipo de siniestro
+        </button>
+      </div>
+
+      {cargando ? (
+        <p className="text-sm text-slate-500">Cargando…</p>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-slate-500">
+          No hay tipos de siniestro registrados. Crea al menos "Simple" y "Por Ingresar".
+        </p>
+      ) : (
+        <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center justify-between px-4 py-3">
+              <div>
+                <div className="font-medium text-slate-900 flex items-center gap-2">
+                  {item.nombre}
+                  <span className="text-xs font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                    {item.codigo}
+                  </span>
+                  {!item.estado && (
+                    <span className="text-xs text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Inactivo</span>
+                  )}
+                </div>
+                <div className="text-sm text-slate-500">{item._count.siniestros} siniestro(s)</div>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={() => abrirEditar(item)} className="p-2 text-slate-500 hover:text-slate-900">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => eliminar(item)} className="p-2 text-slate-500 hover:text-red-600">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modalAbierto && (
+        <ModalTipoSiniestro
+          inicial={editando}
+          error={error}
+          onGuardar={guardar}
+          onCerrar={() => setModalAbierto(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ModalTipoSiniestro({
+  inicial, error, onGuardar, onCerrar,
+}: {
+  inicial: TipoSiniestro | null;
+  error: string | null;
+  onGuardar: (d: { codigo: string; nombre: string; estado: boolean }) => void;
+  onCerrar: () => void;
+}) {
+  const [codigo, setCodigo] = useState(inicial?.codigo ?? '');
+  const [nombre, setNombre] = useState(inicial?.nombre ?? '');
+  const [estado, setEstado] = useState(inicial?.estado ?? true);
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!codigo.trim() || !nombre.trim()) return;
+    onGuardar({ codigo: codigo.trim(), nombre: nombre.trim(), estado });
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-md w-full p-6">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold text-slate-900">
+            {inicial ? 'Editar tipo de siniestro' : 'Nuevo tipo de siniestro'}
+          </h2>
+          <button onClick={onCerrar} className="text-slate-400 hover:text-slate-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Código *</label>
+            <input
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value.toUpperCase())}
+              placeholder="SIMPLE"
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
+              required
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Nombre *</label>
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Simple"
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+              required
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={estado}
+              onChange={(e) => setEstado(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Activo
+          </label>
 
           {error && (
             <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">

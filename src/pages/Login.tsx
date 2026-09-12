@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import isirentLogo from '../assets/isirent-logo-png.png';
 
 export function Login() {
   const { login } = useAuth();
@@ -28,8 +29,10 @@ export function Login() {
     <div className="min-h-screen flex items-center justify-center bg-slate-100">
       <form onSubmit={onSubmit} className="bg-white shadow rounded-lg p-8 w-full max-w-sm space-y-4">
         <div className="text-center mb-2">
-          <h1 className="text-lg font-semibold text-brand-700">Sistema de Siniestros</h1>
-          <p className="text-sm text-slate-500">Renting Ecuador</p>
+          <img src={isirentLogo} alt="isirent" className="h-12 mx-auto mb-2" />
+          <h1 className="text-lg font-semibold text-brand-700">
+            ISI-ASIST | Portal de Siniestros
+          </h1>
         </div>
 
         <div>

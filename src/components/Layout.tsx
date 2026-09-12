@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { LayoutDashboard, FilePlus, Search, Database, Car, Users, LogOut, Menu, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import isirentLogo from '../assets/isirent-logo-png.png';
 
 const ICONOS: Record<string, React.ElementType> = {
   LayoutDashboard,
@@ -20,9 +21,9 @@ export function Layout() {
     <div className="flex flex-col md:flex-row min-h-screen">
       {/* Barra superior solo en movil/tablet */}
       <header className="md:hidden flex items-center justify-between bg-brand-700 text-white px-4 py-3">
-        <div>
-          <h1 className="font-semibold leading-tight text-sm">Sistema de Siniestros</h1>
-          <p className="text-xs text-white/70">Renting Ecuador</p>
+        <div className="flex items-center gap-2">
+          <img src={isirentLogo} alt="isirent" className="h-7" />
+          <h1 className="font-semibold leading-tight text-xs">ISI-ASIST | Portal de Siniestros</h1>
         </div>
         <button onClick={() => setMenuAbierto((v) => !v)} aria-label="Abrir menu">
           {menuAbierto ? <X size={22} /> : <Menu size={22} />}
@@ -60,9 +61,9 @@ export function Layout() {
 
       {/* Sidebar fijo en desktop */}
       <aside className="hidden md:flex md:w-64 bg-brand-700 text-white flex-col shrink-0">
-        <div className="p-4 border-b border-white/10">
-          <h1 className="font-semibold leading-tight">Sistema de Siniestros</h1>
-          <p className="text-xs text-white/70">Renting Ecuador</p>
+        <div className="p-4 border-b border-white/10 text-center">
+          <img src={isirentLogo} alt="isirent" className="h-10 mx-auto mb-2" />
+          <h1 className="font-semibold leading-tight text-sm">ISI-ASIST | Portal de Siniestros</h1>
         </div>
 
         <nav className="flex-1 p-2 space-y-1">
