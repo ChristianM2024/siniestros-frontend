@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { api } from '../api/client';
 import { VehiculoFormModal, type Vehiculo } from '../components/VehiculoFormModal';
 
@@ -56,6 +57,52 @@ export function Vehiculos() {
     }
   }
 
+    function exportarExcel() {
+    const filas = vehiculos.map((v: any) => ({
+      'Placa': v.placa,
+      'Marca': v.marca,
+      'Modelo': v.modelo,
+      'Año': v.anio ?? '',
+      'Color': v.color ?? '',
+      'Chasis': v.chasis ?? '',
+      'No. Motor': v.noMotor ?? '',
+      'Cliente': v.cliente?.nombre ?? '',
+      'No. Contrato': v.noContrato ?? '',
+      'Ciudad': v.ciudad?.nombre ?? '',
+      'Aseguradora': v.aseguradora?.nombre ?? '',
+      'No. Póliza': v.noPoliza ?? '',
+      'Vencimiento Póliza': v.vencimientoPoliza ? String(v.vencimientoPoliza).slice(0, 10) : '',
+      'No. Anexo': v.noAnexo ?? '',
+      'No. Cotización': v.noCotizacion ?? '',
+      'No. Factura': v.noFactura ?? '',
+      'Fecha Inicio Contrato': v.fechaInicioContrato ? String(v.fechaInicioContrato).slice(0, 10) : '',
+      'Fecha Fin Contrato': v.fechaFinContrato ? String(v.fechaFinContrato).slice(0, 10) : '',
+      'Km Anual Contratado': v.kmAnualContratado ?? '',
+      'Administrador': v.administrador?.nombre ?? '',
+      'Gerente de Cuenta': v.gerenteCuenta?.nombre ?? '',
+      'Tipo de Activo': v.tipoActivo?.nombre ?? '',
+      'Tipo de Combustible': v.tipoCombustible?.nombre ?? '',
+      'Clase': v.clase?.nombre ?? '',
+      'Gama': v.gama?.nombre ?? '',
+      'Proveedor de Compra': v.proveedorCompra?.nombre ?? '',
+      'Tipo de Operación': v.tipoOperacion?.nombre ?? '',
+      'Nivel de Blindaje': v.nivelBlindaje?.nombre ?? '',
+      'Transmisión': v.transmision?.nombre ?? '',
+      'RAM': v.ram ?? '',
+      'Blindado': v.blindaje ? 'Sí' : 'No',
+      'Sustituto': v.sustituto ? 'Sí' : 'No',
+      'Estado': v.estado ?? '',
+      'Siniestros': v._count?.siniestros ?? 0,
+    }));
+
+    const hoja = XLSX.utils.json_to_sheet(filas);
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Vehículos');
+
+    const fecha = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(libro, `vehiculos_${fecha}.xlsx`);
+  }
+
   return (
     <div>
       <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-3 mb-6">
@@ -65,12 +112,21 @@ export function Vehiculos() {
             Flota en renting — {vehiculos.length} vehículo{vehiculos.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <button
-          onClick={abrirCrear}
-          className="w-full sm:w-auto px-4 py-2 text-sm rounded-md bg-slate-800 text-white hover:bg-slate-700"
-        >
-          + Nuevo vehículo
-        </button>
+              <div className="flex gap-2 w-full sm:w-auto">
+          <button
+            onClick={exportarExcel}
+            disabled={vehiculos.length === 0}
+            className="flex-1 sm:flex-none px-4 py-2 text-sm rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Exportar a Excel
+          </button>
+          <button
+            onClick={abrirCrear}
+            className="flex-1 sm:flex-none px-4 py-2 text-sm rounded-md bg-slate-800 text-white hover:bg-slate-700"
+          >
+            + Nuevo vehículo
+          </button>
+        </div>
       </div>
 
       {error && (

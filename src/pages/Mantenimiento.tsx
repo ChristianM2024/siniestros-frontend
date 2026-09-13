@@ -2,7 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import {
   Plus, Pencil, Trash2, X, AlertCircle, Building2, Users,
   UserCog, Briefcase, Tag, Fuel, Layers, LayoutGrid, Truck, ShieldAlert, Shield,
-  ListChecks,
+  ListChecks, Wrench, CreditCard, ChevronDown, ChevronRight, MapPin, Cog,
 } from 'lucide-react';
 import { api } from '../api/client';
 
@@ -21,7 +21,7 @@ interface Aseguradora {
   _count: { vehiculos: number };
 }
 
-// Forma común de los 8 catálogos simples (administrador, gerenteCuenta, etc.)
+// Forma común de los catálogos simples (administrador, gerenteCuenta, transmision, etc.)
 interface CatalogoSimple {
   id: number;
   nombre: string;
@@ -50,15 +50,61 @@ interface TipoSiniestro {
   _count: { siniestros: number };
 }
 
+// ---- NUEVOS TIPOS ----
+
+interface Ciudad {
+  id: number;
+  nombre: string;
+}
+
+interface PuntoAtencionTaller {
+  id: number;
+  nombre: string;
+  tallerCiudadId: number;
+}
+
+interface TallerCiudad {
+  id: number;
+  tallerId: number;
+  ciudadId: number;
+  ciudad: Ciudad;
+  _count: { puntosAtencion: number };
+}
+
+interface Taller {
+  id: number;
+  nombre: string;
+  activo: boolean;
+  _count: { siniestros: number };
+  ciudades: TallerCiudad[];
+}
+
+interface EstatusCobroCliente {
+  id: number;
+  nombre: string;
+  _count: { siniestros: number };
+}
+
+interface EstatusSiniestro {
+  id: number;
+  nombre: string;
+  tipoSiniestroId: number;
+  orden: number;
+  activo: boolean;
+  _count: { siniestros: number };
+}
+
 type Tab =
   | 'clientes' | 'aseguradoras'
   | 'administradores' | 'gerentesCuenta' | 'tiposActivo' | 'tiposCombustible'
   | 'clases' | 'gamas' | 'proveedoresCompra' | 'tiposOperacion' | 'nivelesBlindaje'
-  | 'tiposSiniestro';
+  | 'tiposSiniestro'
+  | 'talleres' | 'estatusCobroCliente' | 'estatusSiniestro'
+  | 'transmisiones'; // <-- NUEVA
 
 // Config de cada catálogo simple: ruta de API, etiquetas y en qué tab vive.
 const CATALOGOS_SIMPLES: Record<
-  Exclude<Tab, 'clientes' | 'aseguradoras' | 'gamas' | 'tiposSiniestro'>,
+  Exclude<Tab, 'clientes' | 'aseguradoras' | 'gamas' | 'tiposSiniestro' | 'talleres' | 'estatusCobroCliente' | 'estatusSiniestro'>,
   { apiPath: string; titulo: string; singular: string; icono: any }
 > = {
   administradores:   { apiPath: '/administradores',     titulo: 'Administradores',      singular: 'administrador',       icono: UserCog },
@@ -69,6 +115,7 @@ const CATALOGOS_SIMPLES: Record<
   proveedoresCompra: { apiPath: '/proveedores-compra',   titulo: 'Proveedores de Compra',  singular: 'proveedor de compra', icono: Truck },
   tiposOperacion:    { apiPath: '/tipos-operacion',      titulo: 'Tipos de Operación',    singular: 'tipo de operación',   icono: LayoutGrid },
   nivelesBlindaje:   { apiPath: '/niveles-blindaje',     titulo: 'Niveles de Blindaje',   singular: 'nivel de blindaje',   icono: ShieldAlert },
+  transmisiones:     { apiPath: '/transmisiones',        titulo: 'Transmisiones',         singular: 'transmisión',         icono: Cog }, // <-- NUEVA
 };
 
 const TABS: { id: Tab; label: string; icono: any }[] = [
@@ -83,7 +130,16 @@ const TABS: { id: Tab; label: string; icono: any }[] = [
   { id: 'proveedoresCompra', label: 'Proveedores de Compra', icono: Truck },
   { id: 'tiposOperacion', label: 'Tipos de Operación', icono: LayoutGrid },
   { id: 'nivelesBlindaje', label: 'Niveles de Blindaje', icono: Shield },
-  { id: 'tiposSiniestro', label: 'Tipos de Siniestro', icono: ListChecks },  // <-- NUEVO
+  { id: 'tiposSiniestro', label: 'Tipos de Siniestro', icono: ListChecks },
+  { id: 'talleres', label: 'Talleres', icono: Wrench },
+  { id: 'estatusCobroCliente', label: 'Estatus de Cobro al Cliente', icono: CreditCard },
+  { id: 'estatusSiniestro', label: 'Estatus de Siniestro', icono: ListChecks },
+  { id: 'transmisiones', label: 'Transmisiones', icono: Cog }, // <-- NUEVA
+];
+
+const TABS_CON_COMPONENTE_PROPIO: Tab[] = [
+  'clientes', 'aseguradoras', 'gamas', 'tiposSiniestro',
+  'talleres', 'estatusCobroCliente', 'estatusSiniestro',
 ];
 
 export default function Mantenimiento() {
@@ -93,7 +149,7 @@ export default function Mantenimiento() {
     <div className="max-w-3xl mx-auto p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Mantenimiento</h1>
-        <p className="text-slate-500 mt-1 text-sm">Administra los catálogos usados en Vehículos y Contratos.</p>
+        <p className="text-slate-500 mt-1 text-sm">Administra los catálogos usados en Vehículos, Contratos y Siniestros.</p>
       </div>
 
       <div className="flex gap-2 mb-6 border-b border-slate-200 overflow-x-auto">
@@ -113,9 +169,12 @@ export default function Mantenimiento() {
       {tab === 'clientes' && <TabClientes />}
       {tab === 'aseguradoras' && <TabAseguradoras />}
       {tab === 'gamas' && <TabGamas />}
-      {tab === 'tiposSiniestro' && <TabTiposSiniestro />}   {/* <-- NUEVO */}
-      {tab !== 'clientes' && tab !== 'aseguradoras' && tab !== 'gamas' && tab !== 'tiposSiniestro' && (
-        <TabCatalogoSimple config={CATALOGOS_SIMPLES[tab as Exclude<Tab, 'clientes' | 'aseguradoras' | 'gamas' | 'tiposSiniestro'>]} />
+      {tab === 'tiposSiniestro' && <TabTiposSiniestro />}
+      {tab === 'talleres' && <TabTalleres />}
+      {tab === 'estatusCobroCliente' && <TabEstatusCobroCliente />}
+      {tab === 'estatusSiniestro' && <TabEstatusSiniestro />}
+      {!TABS_CON_COMPONENTE_PROPIO.includes(tab) && (
+        <TabCatalogoSimple config={CATALOGOS_SIMPLES[tab as Exclude<Tab, 'clientes' | 'aseguradoras' | 'gamas' | 'tiposSiniestro' | 'talleres' | 'estatusCobroCliente' | 'estatusSiniestro'>]} />
       )}
     </div>
   );
@@ -124,7 +183,7 @@ export default function Mantenimiento() {
 // ============================================================
 // CATALOGO SIMPLE GENERICO (Administradores, Gerentes de Cuenta,
 // Tipos de Activo, Tipos de Combustible, Clases, Proveedores de
-// Compra, Tipos de Operación, Niveles de Blindaje)
+// Compra, Tipos de Operación, Niveles de Blindaje, Transmisiones)
 // ============================================================
 
 function TabCatalogoSimple({ config }: { config: { apiPath: string; titulo: string; singular: string } }) {
@@ -687,7 +746,698 @@ function ModalTipoSiniestro({
 }
 
 // ============================================================
-// CLIENTES (sin cambios respecto a la versión anterior)
+// TALLERES (Taller -> Ciudades del Taller -> Puntos de Atención)
+// UI de acordeón: cada taller se puede expandir para ver/gestionar
+// sus ciudades, y cada ciudad se puede expandir para ver/gestionar
+// sus puntos de atención.
+// ============================================================
+
+function TabTalleres() {
+  const [talleres, setTalleres] = useState<Taller[]>([]);
+  const [ciudadesCatalogo, setCiudadesCatalogo] = useState<Ciudad[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [editando, setEditando] = useState<Taller | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [tallerExpandido, setTallerExpandido] = useState<number | null>(null);
+  const [ciudadExpandida, setCiudadExpandida] = useState<number | null>(null); // id de TallerCiudad
+
+  async function cargar() {
+    setCargando(true);
+    try {
+      const [talleresRes, ciudadesRes] = await Promise.all([
+        api.get<Taller[]>('/talleres'),
+        api.get<Ciudad[]>('/ciudades'),
+      ]);
+      setTalleres(talleresRes.data);
+      setCiudadesCatalogo(ciudadesRes.data);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  useEffect(() => { cargar(); }, []);
+
+  function abrirNuevo() {
+    setEditando(null);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  function abrirEditar(t: Taller) {
+    setEditando(t);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  async function guardar(nombre: string) {
+    setError(null);
+    try {
+      if (editando) {
+        await api.put(`/talleres/${editando.id}`, { nombre: nombre.trim() });
+      } else {
+        await api.post('/talleres', { nombre: nombre.trim() });
+      }
+      setModalAbierto(false);
+      cargar();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'No se pudo guardar el taller.');
+    }
+  }
+
+  async function eliminar(t: Taller) {
+    if (!confirm(`¿Eliminar el taller "${t.nombre}"?`)) return;
+    try {
+      await api.delete(`/talleres/${t.id}`);
+      cargar();
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo eliminar el taller.');
+    }
+  }
+
+  function toggleTaller(id: number) {
+    setTallerExpandido(tallerExpandido === id ? null : id);
+    setCiudadExpandida(null);
+  }
+
+  async function agregarCiudad(tallerId: number, ciudadId: number) {
+    try {
+      await api.post(`/talleres/${tallerId}/ciudades`, { ciudadId });
+      cargar();
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo asignar la ciudad a este taller.');
+    }
+  }
+
+  async function quitarCiudad(tallerCiudadId: number) {
+    if (!confirm('¿Quitar esta ciudad del taller?')) return;
+    try {
+      await api.delete(`/taller-ciudades/${tallerCiudadId}`);
+      cargar();
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo quitar la ciudad de este taller.');
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex justify-end mb-4">
+        <button
+          onClick={abrirNuevo}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800"
+        >
+          <Plus className="w-4 h-4" /> Nuevo taller
+        </button>
+      </div>
+
+      <p className="text-xs text-slate-500 mb-3">
+        Haz clic en un taller para ver sus ciudades, y en una ciudad para ver sus puntos de atención.
+      </p>
+
+      {cargando ? (
+        <p className="text-sm text-slate-500">Cargando…</p>
+      ) : talleres.length === 0 ? (
+        <p className="text-sm text-slate-500">No hay talleres registrados todavía.</p>
+      ) : (
+        <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+          {talleres.map((t) => (
+            <div key={t.id}>
+              <div className="flex items-center justify-between px-4 py-3">
+                <button
+                  onClick={() => toggleTaller(t.id)}
+                  className="flex items-center gap-2 flex-1 text-left"
+                >
+                  {tallerExpandido === t.id ? (
+                    <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-medium text-slate-900">
+                      {t.nombre}
+                      {!t.activo && (
+                        <span className="ml-2 text-xs text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Inactivo</span>
+                      )}
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      {t.ciudades.length} ciudad(es) · {t._count.siniestros} siniestro(s)
+                    </div>
+                  </div>
+                </button>
+                <div className="flex gap-1">
+                  <button onClick={() => abrirEditar(t)} className="p-2 text-slate-500 hover:text-slate-900">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => eliminar(t)} className="p-2 text-slate-500 hover:text-red-600">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {tallerExpandido === t.id && (
+                <div className="bg-slate-50 px-4 py-3 pl-10">
+                  <PanelCiudadesTaller
+                    taller={t}
+                    ciudadesCatalogo={ciudadesCatalogo}
+                    ciudadExpandida={ciudadExpandida}
+                    onToggleCiudad={(id) => setCiudadExpandida(ciudadExpandida === id ? null : id)}
+                    onAgregarCiudad={(ciudadId) => agregarCiudad(t.id, ciudadId)}
+                    onQuitarCiudad={quitarCiudad}
+                    onCambio={cargar}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modalAbierto && (
+        <ModalNombreUnico
+          titulo={editando ? 'Editar taller' : 'Nuevo taller'}
+          inicial={editando?.nombre ?? ''}
+          error={error}
+          onGuardar={guardar}
+          onCerrar={() => setModalAbierto(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PanelCiudadesTaller({
+  taller, ciudadesCatalogo, ciudadExpandida, onToggleCiudad, onAgregarCiudad, onQuitarCiudad, onCambio,
+}: {
+  taller: Taller;
+  ciudadesCatalogo: Ciudad[];
+  ciudadExpandida: number | null;
+  onToggleCiudad: (id: number) => void;
+  onAgregarCiudad: (ciudadId: number) => void;
+  onQuitarCiudad: (tallerCiudadId: number) => void;
+  onCambio: () => void;
+}) {
+  const [ciudadNuevaId, setCiudadNuevaId] = useState('');
+
+  // Ciudades del catálogo general que este taller todavía NO tiene asignadas
+  const ciudadesDisponibles = ciudadesCatalogo.filter(
+    (c) => !taller.ciudades.some((tc) => tc.ciudadId === c.id)
+  );
+
+  function agregar() {
+    if (!ciudadNuevaId) return;
+    onAgregarCiudad(Number(ciudadNuevaId));
+    setCiudadNuevaId('');
+  }
+
+  return (
+    <div className="space-y-2">
+      {taller.ciudades.length === 0 ? (
+        <p className="text-sm text-slate-500">Este taller no tiene ciudades asignadas todavía.</p>
+      ) : (
+        <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white">
+          {taller.ciudades.map((tc) => (
+            <div key={tc.id}>
+              <div className="flex items-center justify-between px-3 py-2">
+                <button
+                  onClick={() => onToggleCiudad(tc.id)}
+                  className="flex items-center gap-2 flex-1 text-left"
+                >
+                  {ciudadExpandida === tc.id ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  )}
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="text-sm text-slate-800">{tc.ciudad.nombre}</span>
+                  <span className="text-xs text-slate-400">
+                    ({tc._count.puntosAtencion} punto{tc._count.puntosAtencion !== 1 ? 's' : ''} de atención)
+                  </span>
+                </button>
+                <button onClick={() => onQuitarCiudad(tc.id)} className="p-1.5 text-slate-400 hover:text-red-600">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {ciudadExpandida === tc.id && (
+                <div className="bg-slate-50 px-3 py-2 pl-9">
+                  <PanelPuntosAtencion tallerCiudadId={tc.id} onCambio={onCambio} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {ciudadesDisponibles.length > 0 ? (
+        <div className="flex gap-2 pt-1">
+          <select
+            value={ciudadNuevaId}
+            onChange={(e) => setCiudadNuevaId(e.target.value)}
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"
+          >
+            <option value="">Agregar ciudad…</option>
+            {ciudadesDisponibles.map((c) => (
+              <option key={c.id} value={c.id}>{c.nombre}</option>
+            ))}
+          </select>
+          <button
+            onClick={agregar}
+            disabled={!ciudadNuevaId}
+            className="px-3 py-2 bg-slate-900 text-white text-sm rounded-lg disabled:opacity-40"
+          >
+            Agregar
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">
+          Todas las ciudades del catálogo ya están asignadas a este taller.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PanelPuntosAtencion({ tallerCiudadId, onCambio }: { tallerCiudadId: number; onCambio: () => void }) {
+  const [puntos, setPuntos] = useState<PuntoAtencionTaller[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [nombreNuevo, setNombreNuevo] = useState('');
+
+  async function cargar() {
+    setCargando(true);
+    try {
+      const { data } = await api.get<PuntoAtencionTaller[]>(`/taller-ciudades/${tallerCiudadId}/puntos-atencion`);
+      setPuntos(data);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  useEffect(() => { cargar(); }, [tallerCiudadId]);
+
+  async function agregar() {
+    if (!nombreNuevo.trim()) return;
+    try {
+      await api.post(`/taller-ciudades/${tallerCiudadId}/puntos-atencion`, { nombre: nombreNuevo.trim() });
+      setNombreNuevo('');
+      cargar();
+      onCambio(); // refresca el contador en el panel de arriba
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo agregar el punto de atención.');
+    }
+  }
+
+  async function eliminar(p: PuntoAtencionTaller) {
+    if (!confirm(`¿Eliminar el punto de atención "${p.nombre}"?`)) return;
+    try {
+      await api.delete(`/puntos-atencion-taller/${p.id}`);
+      cargar();
+      onCambio();
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo eliminar el punto de atención.');
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {cargando ? (
+        <p className="text-xs text-slate-400">Cargando puntos de atención…</p>
+      ) : puntos.length === 0 ? (
+        <p className="text-xs text-slate-400">Sin puntos de atención en esta ciudad todavía.</p>
+      ) : (
+        <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white">
+          {puntos.map((p) => (
+            <div key={p.id} className="flex items-center justify-between px-3 py-1.5">
+              <span className="text-sm text-slate-700">{p.nombre}</span>
+              <button onClick={() => eliminar(p)} className="p-1 text-slate-400 hover:text-red-600">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input
+          value={nombreNuevo}
+          onChange={(e) => setNombreNuevo(e.target.value)}
+          placeholder="Nombre del punto de atención"
+          className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm"
+        />
+        <button
+          onClick={agregar}
+          disabled={!nombreNuevo.trim()}
+          className="px-3 py-1.5 bg-slate-900 text-white text-sm rounded-lg disabled:opacity-40"
+        >
+          Agregar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ESTATUS DE COBRO AL CLIENTE (catálogo simple, cuenta
+// siniestros en vez de vehículos — por eso no usa el genérico)
+// ============================================================
+
+function TabEstatusCobroCliente() {
+  const [items, setItems] = useState<EstatusCobroCliente[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [editando, setEditando] = useState<EstatusCobroCliente | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function cargar() {
+    setCargando(true);
+    try {
+      const { data } = await api.get<EstatusCobroCliente[]>('/estatus-cobro-cliente');
+      setItems(data);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  useEffect(() => { cargar(); }, []);
+
+  function abrirNuevo() {
+    setEditando(null);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  function abrirEditar(item: EstatusCobroCliente) {
+    setEditando(item);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  async function guardar(nombre: string) {
+    setError(null);
+    try {
+      if (editando) {
+        await api.put(`/estatus-cobro-cliente/${editando.id}`, { nombre: nombre.trim() });
+      } else {
+        await api.post('/estatus-cobro-cliente', { nombre: nombre.trim() });
+      }
+      setModalAbierto(false);
+      cargar();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'No se pudo guardar el estatus de cobro.');
+    }
+  }
+
+  async function eliminar(item: EstatusCobroCliente) {
+    if (!confirm(`¿Eliminar "${item.nombre}"?`)) return;
+    try {
+      await api.delete(`/estatus-cobro-cliente/${item.id}`);
+      cargar();
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo eliminar el estatus de cobro.');
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex justify-end mb-4">
+        <button
+          onClick={abrirNuevo}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800"
+        >
+          <Plus className="w-4 h-4" /> Nuevo estatus de cobro
+        </button>
+      </div>
+
+      {cargando ? (
+        <p className="text-sm text-slate-500">Cargando…</p>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-slate-500">No hay estatus de cobro registrados todavía.</p>
+      ) : (
+        <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center justify-between px-4 py-3">
+              <div>
+                <div className="font-medium text-slate-900">{item.nombre}</div>
+                <div className="text-sm text-slate-500">{item._count.siniestros} siniestro(s)</div>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={() => abrirEditar(item)} className="p-2 text-slate-500 hover:text-slate-900">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => eliminar(item)} className="p-2 text-slate-500 hover:text-red-600">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modalAbierto && (
+        <ModalNombreUnico
+          titulo={editando ? 'Editar estatus de cobro' : 'Nuevo estatus de cobro'}
+          inicial={editando?.nombre ?? ''}
+          error={error}
+          onGuardar={guardar}
+          onCerrar={() => setModalAbierto(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ESTATUS DE SINIESTRO (filtrado por Tipo de Siniestro)
+// Primero se elige el tipo, luego se ve/gestiona su lista de
+// estatus posibles (con orden de aparición en los combos).
+// ============================================================
+
+function TabEstatusSiniestro() {
+  const [tipos, setTipos] = useState<TipoSiniestro[]>([]);
+  const [tipoSeleccionado, setTipoSeleccionado] = useState<number | null>(null);
+  const [items, setItems] = useState<EstatusSiniestro[]>([]);
+  const [cargandoTipos, setCargandoTipos] = useState(true);
+  const [cargandoItems, setCargandoItems] = useState(false);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [editando, setEditando] = useState<EstatusSiniestro | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function cargarTipos() {
+    setCargandoTipos(true);
+    try {
+      const { data } = await api.get<TipoSiniestro[]>('/tipos-siniestro');
+      setTipos(data);
+      if (data.length > 0 && tipoSeleccionado === null) {
+        setTipoSeleccionado(data[0].id);
+      }
+    } finally {
+      setCargandoTipos(false);
+    }
+  }
+
+  async function cargarItems(tipoId: number) {
+    setCargandoItems(true);
+    try {
+      const { data } = await api.get<EstatusSiniestro[]>('/estatus-siniestro', {
+        params: { tipoSiniestroId: tipoId },
+      });
+      setItems(data);
+    } finally {
+      setCargandoItems(false);
+    }
+  }
+
+  useEffect(() => { cargarTipos(); }, []);
+  useEffect(() => {
+    if (tipoSeleccionado !== null) cargarItems(tipoSeleccionado);
+  }, [tipoSeleccionado]);
+
+  function abrirNuevo() {
+    setEditando(null);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  function abrirEditar(item: EstatusSiniestro) {
+    setEditando(item);
+    setError(null);
+    setModalAbierto(true);
+  }
+
+  async function guardar(datos: { nombre: string; orden: number }) {
+    if (!tipoSeleccionado) return;
+    setError(null);
+    try {
+      if (editando) {
+        await api.put(`/estatus-siniestro/${editando.id}`, datos);
+      } else {
+        await api.post('/estatus-siniestro', { ...datos, tipoSiniestroId: tipoSeleccionado });
+      }
+      setModalAbierto(false);
+      cargarItems(tipoSeleccionado);
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'No se pudo guardar el estatus.');
+    }
+  }
+
+  async function eliminar(item: EstatusSiniestro) {
+    if (!confirm(`¿Eliminar el estatus "${item.nombre}"?`)) return;
+    try {
+      await api.delete(`/estatus-siniestro/${item.id}`);
+      if (tipoSeleccionado) cargarItems(tipoSeleccionado);
+    } catch (err: any) {
+      alert(err?.response?.data?.error ?? 'No se pudo eliminar el estatus.');
+    }
+  }
+
+  if (!cargandoTipos && tipos.length === 0) {
+    return (
+      <p className="text-sm text-slate-500">
+        Primero crea al menos un <strong>Tipo de Siniestro</strong> (pestaña "Tipos de Siniestro") —
+        cada estatus pertenece a un tipo específico.
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <select
+          value={tipoSeleccionado ?? ''}
+          onChange={(e) => setTipoSeleccionado(Number(e.target.value))}
+          className="px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm flex-1 max-w-xs"
+        >
+          {tipos.map((t) => (
+            <option key={t.id} value={t.id}>{t.nombre}</option>
+          ))}
+        </select>
+        <button
+          onClick={abrirNuevo}
+          disabled={!tipoSeleccionado}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-40"
+        >
+          <Plus className="w-4 h-4" /> Nuevo estatus
+        </button>
+      </div>
+
+      {cargandoItems ? (
+        <p className="text-sm text-slate-500">Cargando…</p>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-slate-500">Este tipo de siniestro todavía no tiene estatus configurados.</p>
+      ) : (
+        <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center justify-between px-4 py-3">
+              <div>
+                <div className="font-medium text-slate-900 flex items-center gap-2">
+                  {item.nombre}
+                  <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                    orden {item.orden}
+                  </span>
+                  {!item.activo && (
+                    <span className="text-xs text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Inactivo</span>
+                  )}
+                </div>
+                <div className="text-sm text-slate-500">{item._count.siniestros} siniestro(s)</div>
+              </div>
+              <div className="flex gap-1">
+                <button onClick={() => abrirEditar(item)} className="p-2 text-slate-500 hover:text-slate-900">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => eliminar(item)} className="p-2 text-slate-500 hover:text-red-600">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modalAbierto && (
+        <ModalEstatusSiniestro
+          inicial={editando}
+          error={error}
+          onGuardar={guardar}
+          onCerrar={() => setModalAbierto(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ModalEstatusSiniestro({
+  inicial, error, onGuardar, onCerrar,
+}: {
+  inicial: EstatusSiniestro | null;
+  error: string | null;
+  onGuardar: (d: { nombre: string; orden: number }) => void;
+  onCerrar: () => void;
+}) {
+  const [nombre, setNombre] = useState(inicial?.nombre ?? '');
+  const [orden, setOrden] = useState<number>(inicial?.orden ?? 0);
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!nombre.trim()) return;
+    onGuardar({ nombre: nombre.trim(), orden });
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-md w-full p-6">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold text-slate-900">
+            {inicial ? 'Editar estatus' : 'Nuevo estatus'}
+          </h2>
+          <button onClick={onCerrar} className="text-slate-400 hover:text-slate-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Nombre *</label>
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="En Peritaje"
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+              required
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Orden</label>
+            <input
+              type="number"
+              value={orden}
+              onChange={(e) => setOrden(Number(e.target.value))}
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+            />
+            <p className="text-xs text-slate-400 mt-1">Define el orden en que aparece este estatus en el combo (menor primero).</p>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onCerrar} className="flex-1 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Cancelar
+            </button>
+            <button type="submit" className="flex-1 py-2.5 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800">
+              Guardar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// CLIENTES
 // ============================================================
 
 function TabClientes() {
@@ -881,7 +1631,7 @@ function ModalCliente({
 }
 
 // ============================================================
-// ASEGURADORAS (sin cambios respecto a la versión anterior)
+// ASEGURADORAS
 // ============================================================
 
 function TabAseguradoras() {

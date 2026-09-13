@@ -63,6 +63,8 @@ export interface Vehiculo {
   proveedorCompraId?: number | null;
   tipoOperacionId?: number | null;
   nivelBlindajeId?: number | null;
+  transmisionId?: number | null; // <-- NUEVO
+  ram?: string | null; // <-- NUEVO
 
   // --- NUEVO: banderas ---
   blindaje?: boolean;
@@ -108,7 +110,8 @@ const VACIO: Vehiculo = {
   proveedorCompraId: undefined,
   tipoOperacionId: undefined,
   nivelBlindajeId: undefined,
-
+  transmisionId: undefined,
+  ram: '',
   blindaje: false,
   sustituto: false,
 };
@@ -136,7 +139,7 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
   const [proveedoresCompra, setProveedoresCompra] = useState<CatalogoSimple[]>([]);
   const [tiposOperacion, setTiposOperacion] = useState<CatalogoSimple[]>([]);
   const [nivelesBlindaje, setNivelesBlindaje] = useState<CatalogoSimple[]>([]);
-
+  const [transmisiones, setTransmisiones] = useState<CatalogoSimple[]>([]); // <-- NUEVO
   const [guardando, setGuardando] = useState(false);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [errorGeneral, setErrorGeneral] = useState('');
@@ -173,6 +176,7 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
     api.get('/proveedores-compra').then((res) => setProveedoresCompra(res.data)).catch(() => setProveedoresCompra([]));
     api.get('/tipos-operacion').then((res) => setTiposOperacion(res.data)).catch(() => setTiposOperacion([]));
     api.get('/niveles-blindaje').then((res) => setNivelesBlindaje(res.data)).catch(() => setNivelesBlindaje([]));
+    api.get('/transmisiones').then((res) => setTransmisiones(res.data)).catch(() => setTransmisiones([]));  
   }, [open, vehiculo]);
 
   if (!open) return null;
@@ -217,6 +221,7 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
       gamaId: form.gamaId ? Number(form.gamaId) : undefined,
       proveedorCompraId: form.proveedorCompraId ? Number(form.proveedorCompraId) : undefined,
       tipoOperacionId: form.tipoOperacionId ? Number(form.tipoOperacionId) : undefined,
+      transmisionId: form.transmisionId ? Number(form.transmisionId) : undefined, // <-- NUEVO
       // si desmarcan blindaje, no tiene sentido conservar el nivel
       nivelBlindajeId: form.blindaje && form.nivelBlindajeId ? Number(form.nivelBlindajeId) : undefined,
     };
@@ -395,6 +400,30 @@ export function VehiculoFormModal({ open, vehiculo, onClose, onSaved }: Props) {
                     </option>
                   ))}
                 </select>
+              </Campo>
+              <Campo label="Transmisión">
+                <select
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.transmisionId ?? ''}
+                  onChange={(e) =>
+                    actualizar('transmisionId', e.target.value ? Number(e.target.value) : undefined)
+                  }
+                >
+                  <option value="">— Sin especificar —</option>
+                  {transmisiones.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo label="RAM">
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  value={form.ram ?? ''}
+                  onChange={(e) => actualizar('ram', e.target.value)}
+                  placeholder="8GB"
+                />
               </Campo>
             </div>
           </div>

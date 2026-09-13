@@ -1,15 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
-
-const ESTADOS = ['Reportado', 'En_Peritaje', 'En_Reparacion', 'Entregado', 'Cerrado'];
-
-const COLOR_ESTADO: Record<string, string> = {
-  Reportado: 'bg-slate-100 text-slate-700',
-  En_Peritaje: 'bg-amber-100 text-amber-700',
-  En_Reparacion: 'bg-orange-100 text-orange-700',
-  Entregado: 'bg-blue-100 text-blue-700',
-  Cerrado: 'bg-emerald-100 text-emerald-700',
-};
+import { useAuth } from '../context/AuthContext';
 
 function formatFecha(valor?: string) {
   if (!valor) return null;
@@ -23,17 +14,58 @@ function formatBooleano(valor?: boolean) {
   return valor ? 'Sí' : 'No';
 }
 
+type TabId = 'cliente' | 'gestion' | 'bitacora';
+
 export function Seguimiento() {
+  const { usuario } = useAuth();
+
+  // ---- Control de quién puede reasignar el Tipo/Estatus de un siniestro
+  //      que ya tiene tipo asignado. AJUSTA los valores de comparación aquí
+  //      si tu campo `rolNombre` usa otro texto exacto (ej. "Administrador"). ----
+  const rol = (usuario?.rolNombre || '').toLowerCase();
+  const puedeReasignarTipo = rol.includes('admin') || rol.includes('supervisor');
+
   const [lista, setLista] = useState<any[]>([]);
   const [cargandoLista, setCargandoLista] = useState(true);
   const [filtro, setFiltro] = useState('');
   const [siniestro, setSiniestro] = useState<any>(null);
   const [mensaje, setMensaje] = useState('');
+  const [tab, setTab] = useState<TabId>('cliente');
+
+  // ---- Controla si se muestran los combos de Tipo/Estatus dentro de
+  //      "Datos de Gestión" para un siniestro que ya tiene tipo asignado
+  //      (solo alcanzable vía el botón "Cambiar", visible solo para
+  //      admin/supervisor) ----
+  const [editandoTipo, setEditandoTipo] = useState(false);
+
+  // ---- Guardado de la pantalla de asignación inicial (Tipo + Estatus) ----
+  const [asignando, setAsignando] = useState(false);
+
+  // ---- Catálogos que se cargan una sola vez ----
   const [tiposSiniestro, setTiposSiniestro] = useState<any[]>([]);
+  const [estatusCobroCliente, setEstatusCobroCliente] = useState<any[]>([]);
+  const [talleres, setTalleres] = useState<any[]>([]);
+
+  // ---- Catálogos dependientes (se recargan según la selección) ----
+  const [estatusSiniestro, setEstatusSiniestro] = useState<any[]>([]);
+  const [ciudadesTaller, setCiudadesTaller] = useState<any[]>([]);
+  const [puntosAtencion, setPuntosAtencion] = useState<any[]>([]);
+
+  // ---- Bitácora (se carga solo cuando se abre esa pestaña) ----
+  const [historial, setHistorial] = useState<any[]>([]);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
+
   const [form, setForm] = useState({
     fechaNotifAseg: '', fechaIngresoTaller: '', fechaProforma: '',
-    fechaAutorizacion: '', fechaEntrega: '', estado: 'Reportado', notas: '',
+    fechaAutorizacion: '', fechaEntrega: '', notas: '',
     tipoSiniestroId: '',
+    estatusSiniestroId: '',
+    estatusCobroClienteId: '',
+    tallerId: '',
+    tallerCiudadId: '',
+    puntoAtencionTallerId: '',
+    tieneCotizacion: false,
+    movilizadoGrua: false,
   });
 
   async function cargarLista() {
@@ -46,46 +78,135 @@ export function Seguimiento() {
     }
   }
 
-  async function cargarTiposSiniestro() {
+  async function cargarCatalogosBase() {
     try {
-      const { data } = await api.get('/tipos-siniestro');
-      setTiposSiniestro(data);
+      const [tipos, cobro, talleresRes] = await Promise.all([
+        api.get('/tipos-siniestro'),
+        api.get('/estatus-cobro-cliente'),
+        api.get('/talleres'),
+      ]);
+      setTiposSiniestro(tipos.data);
+      setEstatusCobroCliente(cobro.data);
+      setTalleres(talleresRes.data);
     } catch {
-      // si falla, el combo simplemente queda vacío; no bloqueamos el resto de la pantalla
+      // si algún catálogo falla, los combos correspondientes simplemente quedan vacíos
     }
   }
 
   useEffect(() => {
     cargarLista();
-    cargarTiposSiniestro();
+    cargarCatalogosBase();
   }, []);
+
+  useEffect(() => {
+    if (!form.tipoSiniestroId) {
+      setEstatusSiniestro([]);
+      return;
+    }
+    api.get('/estatus-siniestro', { params: { tipoSiniestroId: form.tipoSiniestroId } })
+      .then(({ data }) => setEstatusSiniestro(data))
+      .catch(() => setEstatusSiniestro([]));
+  }, [form.tipoSiniestroId]);
+
+  useEffect(() => {
+    if (!form.tallerId) {
+      setCiudadesTaller([]);
+      return;
+    }
+    api.get(`/talleres/${form.tallerId}/ciudades`)
+      .then(({ data }) => setCiudadesTaller(data))
+      .catch(() => setCiudadesTaller([]));
+  }, [form.tallerId]);
+
+  useEffect(() => {
+    if (!form.tallerCiudadId) {
+      setPuntosAtencion([]);
+      return;
+    }
+    api.get(`/taller-ciudades/${form.tallerCiudadId}/puntos-atencion`)
+      .then(({ data }) => setPuntosAtencion(data))
+      .catch(() => setPuntosAtencion([]));
+  }, [form.tallerCiudadId]);
+
+  // ---- Carga la bitácora solo la primera vez que se entra a esa pestaña ----
+  useEffect(() => {
+    if (tab !== 'bitacora' || !siniestro) return;
+    setCargandoHistorial(true);
+    api.get(`/siniestros/${siniestro.id}/historial`)
+      .then(({ data }) => setHistorial(data))
+      .catch(() => setHistorial([]))
+      .finally(() => setCargandoHistorial(false));
+  }, [tab, siniestro?.id]);
 
   function abrirSiniestro(s: any) {
     setSiniestro(s);
     setMensaje('');
+    setTab('cliente');
+    setHistorial([]);
+    setEditandoTipo(false);
     setForm({
       fechaNotifAseg: s.fechaNotifAseg?.slice(0, 10) || '',
       fechaIngresoTaller: s.fechaIngresoTaller?.slice(0, 10) || '',
       fechaProforma: s.fechaProforma?.slice(0, 10) || '',
       fechaAutorizacion: s.fechaAutorizacion?.slice(0, 10) || '',
       fechaEntrega: s.fechaEntrega?.slice(0, 10) || '',
-      estado: s.estado,
       notas: s.notas || '',
       tipoSiniestroId: s.tipoSiniestroId ? String(s.tipoSiniestroId) : '',
+      estatusSiniestroId: s.estatusSiniestroId ? String(s.estatusSiniestroId) : '',
+      estatusCobroClienteId: s.estatusCobroClienteId ? String(s.estatusCobroClienteId) : '',
+      tallerId: s.tallerCiudad?.tallerId ? String(s.tallerCiudad.tallerId) : '',
+      tallerCiudadId: s.tallerCiudadId ? String(s.tallerCiudadId) : '',
+      puntoAtencionTallerId: s.puntoAtencionTallerId ? String(s.puntoAtencionTallerId) : '',
+      tieneCotizacion: !!s.tieneCotizacion,
+      movilizadoGrua: !!s.movilizadoGrua,
     });
+  }
+
+  // ---- Guarda SOLO Tipo + Estatus de Siniestro (pantalla de asignación inicial,
+  //      o reasignación desde "Cambiar" para admin/supervisor) ----
+  async function asignarTipo() {
+    if (!siniestro) return;
+    setAsignando(true);
+    try {
+      const payload = {
+        tipoSiniestroId: form.tipoSiniestroId ? Number(form.tipoSiniestroId) : undefined,
+        estatusSiniestroId: form.estatusSiniestroId ? Number(form.estatusSiniestroId) : undefined,
+      };
+      const { data } = await api.patch(`/siniestros/${siniestro.id}/seguimiento`, payload);
+      setSiniestro(data);
+      setEditandoTipo(false);
+      setMensaje('Tipo de siniestro asignado correctamente.');
+      cargarLista();
+    } catch (err: any) {
+      setMensaje(err.response?.data?.error || 'Error al asignar el tipo de siniestro');
+    } finally {
+      setAsignando(false);
+    }
   }
 
   async function actualizar() {
     if (!siniestro) return;
     try {
       const payload = {
-        ...form,
+        fechaNotifAseg: form.fechaNotifAseg || undefined,
+        fechaIngresoTaller: form.fechaIngresoTaller || undefined,
+        fechaProforma: form.fechaProforma || undefined,
+        fechaAutorizacion: form.fechaAutorizacion || undefined,
+        fechaEntrega: form.fechaEntrega || undefined,
+        notas: form.notas,
         tipoSiniestroId: form.tipoSiniestroId ? Number(form.tipoSiniestroId) : undefined,
+        estatusSiniestroId: form.estatusSiniestroId ? Number(form.estatusSiniestroId) : undefined,
+        estatusCobroClienteId: form.estatusCobroClienteId ? Number(form.estatusCobroClienteId) : undefined,
+        tallerCiudadId: form.tallerCiudadId ? Number(form.tallerCiudadId) : undefined,
+        puntoAtencionTallerId: form.puntoAtencionTallerId ? Number(form.puntoAtencionTallerId) : undefined,
+        tieneCotizacion: form.tieneCotizacion,
+        movilizadoGrua: form.movilizadoGrua,
       };
       const { data } = await api.patch(`/siniestros/${siniestro.id}/seguimiento`, payload);
       setSiniestro(data);
+      setEditandoTipo(false);
       setMensaje('Siniestro actualizado correctamente.');
-      cargarLista(); // refresca la tabla para reflejar el nuevo estado / tipo
+      cargarLista();
     } catch (err: any) {
       setMensaje(err.response?.data?.error || 'Error al actualizar');
     }
@@ -101,8 +222,6 @@ export function Seguimiento() {
     );
   });
 
-  // Datos del reporte original, solo lectura. Se arma dinámicamente y se
-  // omiten los campos que vinieron vacíos para no llenar la pantalla de "—".
   const datosReporte = siniestro
     ? ([
         ['No. Siniestro', siniestro.noSiniestro],
@@ -126,10 +245,18 @@ export function Seguimiento() {
       ] as [string, any][]).filter(([, valor]) => valor !== undefined && valor !== null && valor !== '')
     : [];
 
+  const tabs: { id: TabId; label: string }[] = [
+    { id: 'cliente', label: 'Formulario del Cliente' },
+    { id: 'gestion', label: 'Datos de Gestión' },
+    { id: 'bitacora', label: 'Bitácora' },
+  ];
+
+  const tieneTipoAsignado = !!siniestro?.tipoSiniestroId;
+
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-xl font-semibold mb-1">Seguimiento de Siniestros</h1>
-      <p className="text-sm text-slate-500 mb-6">Todos los siniestros registrados. Selecciona uno para actualizar sus fechas y estado.</p>
+      <p className="text-sm text-slate-500 mb-6">Todos los siniestros registrados. Selecciona uno para actualizar sus fechas y estatus.</p>
 
       <div className="bg-white rounded-lg shadow p-4 mb-4">
         <input
@@ -153,7 +280,7 @@ export function Seguimiento() {
                 <th className="px-4 py-2">Placa</th>
                 <th className="px-4 py-2">Conductor</th>
                 <th className="px-4 py-2">Tipo</th>
-                <th className="px-4 py-2">Estado</th>
+                <th className="px-4 py-2">Estatus</th>
                 <th className="px-4 py-2">Fecha</th>
               </tr>
             </thead>
@@ -169,8 +296,8 @@ export function Seguimiento() {
                   <td className="px-4 py-2">{s.conductor}</td>
                   <td className="px-4 py-2">{s.tipoSiniestro?.nombre || '—'}</td>
                   <td className="px-4 py-2">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${COLOR_ESTADO[s.estado] || 'bg-slate-100 text-slate-700'}`}>
-                      {s.estado.replace('_', ' ')}
+                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
+                      {s.estatusSiniestro?.nombre || '— Sin asignar —'}
                     </span>
                   </td>
                   <td className="px-4 py-2 text-slate-500">
@@ -185,93 +312,347 @@ export function Seguimiento() {
 
       {mensaje && !siniestro && <p className="text-sm text-brand-700 mb-4">{mensaje}</p>}
 
-      {siniestro && (
-        <div className="bg-white rounded-lg shadow p-4 space-y-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-600">
-              <strong>{siniestro.noSiniestro}</strong> — {siniestro.vehiculo?.placa} — {siniestro.conductor}
+      {/* ================= PANTALLA DE ASIGNACIÓN INICIAL =================
+          Se muestra cuando el siniestro seleccionado todavía NO tiene
+          Tipo de Siniestro asignado. Solo pide Tipo + Estatus y, al guardar,
+          pasa automáticamente a la vista completa de pestañas. */}
+      {siniestro && !tieneTipoAsignado && (
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex items-start justify-between mb-6">
+            <p className="text-sm font-semibold text-slate-800">
+              {siniestro.noSiniestro} <span className="font-normal text-slate-500">— {siniestro.vehiculo?.placa} — {siniestro.conductor}</span>
             </p>
             <button onClick={() => setSiniestro(null)} className="text-xs text-slate-400 hover:text-slate-700">
               Cerrar
             </button>
           </div>
 
-          {/* ---------- Datos del reporte original: solo lectura ---------- */}
-          {datosReporte.length > 0 && (
+          <p className="text-sm text-slate-500 mb-4">
+            Asigna el Tipo y Estatus de Siniestro para habilitar el resto de los datos de gestión.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
             <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Datos del reporte</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 rounded-lg p-3">
-                {datosReporte.map(([label, valor]) => (
-                  <div key={label}>
-                    <label className="block text-xs font-medium text-slate-500 mb-0.5">{label}</label>
-                    <p className="text-sm text-slate-700 bg-white border border-slate-200 rounded px-3 py-2 cursor-not-allowed select-text">
-                      {valor}
-                    </p>
-                  </div>
+              <label className="block text-sm font-medium mb-1">Tipo de Siniestro</label>
+              <select value={form.tipoSiniestroId}
+                onChange={(e) => setForm({ ...form, tipoSiniestroId: e.target.value, estatusSiniestroId: '' })}
+                className="w-full border rounded px-3 py-2 text-sm">
+                <option value="">Seleccione…</option>
+                {tiposSiniestro.map((t) => (
+                  <option key={t.id} value={t.id}>{t.nombre}</option>
                 ))}
-              </div>
+              </select>
             </div>
-          )}
 
-          {/* ---------- Seguimiento: editable ---------- */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Seguimiento</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                ['fechaNotifAseg', 'Fecha Notif. Aseg.'],
-                ['fechaIngresoTaller', 'Fecha Ingreso Taller'],
-                ['fechaProforma', 'Fecha Proforma'],
-                ['fechaAutorizacion', 'Fecha Autorizacion'],
-                ['fechaEntrega', 'Fecha Entrega'],
-              ].map(([key, label]) => (
-                <div key={key}>
-                  <label className="block text-sm font-medium mb-1">{label}</label>
-                  <input type="date" value={(form as any)[key]}
-                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm" />
-                </div>
-              ))}
-              <div>
-                <label className="block text-sm font-medium mb-1">Estado</label>
-                <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm">
-                  {ESTADOS.map((e) => <option key={e} value={e}>{e.replace('_', ' ')}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Tipo de Siniestro</label>
-                <select value={form.tipoSiniestroId}
-                  onChange={(e) => setForm({ ...form, tipoSiniestroId: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm">
-                  <option value="">— Sin asignar —</option>
-                  {tiposSiniestro.map((t) => (
-                    <option key={t.id} value={t.id}>{t.nombre}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Estatus del Siniestro</label>
+              <select value={form.estatusSiniestroId}
+                disabled={!form.tipoSiniestroId}
+                onChange={(e) => setForm({ ...form, estatusSiniestroId: e.target.value })}
+                className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100">
+                <option value="">Seleccione…</option>
+                {estatusSiniestro.map((e) => (
+                  <option key={e.id} value={e.id}>{e.nombre}</option>
+                ))}
+              </select>
+              {!form.tipoSiniestroId && (
+                <p className="text-xs text-slate-400 mt-1">Seleccione primero el Tipo de Siniestro.</p>
+              )}
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Notas</label>
-            <textarea value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })}
-              className="w-full border rounded px-3 py-2 text-sm" rows={2} />
-          </div>
+          {mensaje && <p className="text-sm text-brand-700 mt-4">{mensaje}</p>}
 
-          {siniestro.tiempos && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-sm">
-              <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Tiempo A</p><p className="font-semibold">{siniestro.tiempos.tiempoA ?? '-'}</p></div>
-              <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Tiempo B</p><p className="font-semibold">{siniestro.tiempos.tiempoB ?? '-'}</p></div>
-              <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Tiempo C</p><p className="font-semibold">{siniestro.tiempos.tiempoC ?? '-'}</p></div>
-              <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Total</p><p className="font-semibold">{siniestro.tiempos.tiempoTotal ?? '-'}</p></div>
-            </div>
-          )}
-
-          {mensaje && <p className="text-sm text-brand-700">{mensaje}</p>}
-
-          <button onClick={actualizar} className="w-full sm:w-auto bg-brand-700 text-white text-sm px-5 py-2.5 rounded">
-            Actualizar Siniestro
+          <button
+            onClick={asignarTipo}
+            disabled={!form.tipoSiniestroId || !form.estatusSiniestroId || asignando}
+            className="mt-6 bg-brand-700 text-white text-sm px-5 py-2.5 rounded disabled:opacity-50"
+          >
+            {asignando ? 'Guardando…' : 'Guardar y Asignar'}
           </button>
+        </div>
+      )}
+
+      {/* ================= VISTA COMPLETA (3 pestañas) =================
+          Se muestra una vez que el siniestro ya tiene Tipo asignado. */}
+      {siniestro && tieneTipoAsignado && (
+        <div className="bg-white rounded-lg shadow p-4">
+          {/* ---------- Encabezado ---------- */}
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">
+                {siniestro.noSiniestro} <span className="font-normal text-slate-500">— {siniestro.vehiculo?.placa} — {siniestro.conductor}</span>
+              </p>
+            </div>
+            <div className="flex items-start gap-6">
+              <div className="text-right text-xs">
+                <p className="text-slate-400">Tipo de Siniestro</p>
+                <p className="font-medium text-slate-700">{siniestro.tipoSiniestro?.nombre || '— Sin asignar —'}</p>
+              </div>
+              <div className="text-right text-xs">
+                <p className="text-slate-400">Estado del siniestro</p>
+                <p className="font-medium text-slate-700">{siniestro.estatusSiniestro?.nombre || '— Sin asignar —'}</p>
+              </div>
+              <div className="text-right text-xs">
+                <p className="text-slate-400">Cobro al cliente</p>
+                <p className="font-medium text-slate-700">{siniestro.estatusCobroCliente?.nombre || '— Sin asignar —'}</p>
+              </div>
+              <button onClick={() => setSiniestro(null)} className="text-xs text-slate-400 hover:text-slate-700">
+                Cerrar
+              </button>
+            </div>
+          </div>
+
+          {/* ---------- Barra de pestañas ---------- */}
+          <div className="flex border-b border-slate-200 mb-5">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  tab === t.id
+                    ? 'border-brand-700 text-brand-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ---------- Pestaña: Formulario del Cliente ---------- */}
+          {tab === 'cliente' && (
+            <div>
+              {datosReporte.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 rounded-lg p-3">
+                  {datosReporte.map(([label, valor]) => (
+                    <div key={label}>
+                      <label className="block text-xs font-medium text-slate-500 mb-0.5">{label}</label>
+                      <p className="text-sm text-slate-700 bg-white border border-slate-200 rounded px-3 py-2 cursor-not-allowed select-text">
+                        {valor}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">Este siniestro no tiene datos de reporte registrados.</p>
+              )}
+            </div>
+          )}
+
+          {/* ---------- Pestaña: Datos de Gestión ---------- */}
+          {tab === 'gestion' && (
+            <div className="space-y-5">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Seguimiento</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    ['fechaNotifAseg', 'Fecha Notif. Aseg.'],
+                    ['fechaIngresoTaller', 'Fecha Ingreso Taller'],
+                    ['fechaProforma', 'Fecha Proforma'],
+                    ['fechaAutorizacion', 'Fecha Autorizacion'],
+                    ['fechaEntrega', 'Fecha Entrega'],
+                  ].map(([key, label]) => (
+                    <div key={key}>
+                      <label className="block text-sm font-medium mb-1">{label}</label>
+                      <input type="date" value={(form as any)[key]}
+                        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm" />
+                    </div>
+                  ))}
+
+                  {/* Tipo y Estatus del Siniestro: ya asignados -> se muestran como
+                      consulta (ya se ven arriba en el encabezado). El botón
+                      "Cambiar" para reasignar SOLO aparece para admin/supervisor;
+                      un operador nunca ve los combos aquí. */}
+                  {!editandoTipo ? (
+                    <div className="sm:col-span-2 flex items-center justify-between bg-slate-50 border border-slate-200 rounded px-3 py-2">
+                      <div className="text-sm">
+                        <span className="text-slate-500">Tipo: </span>
+                        <span className="font-medium text-slate-700">
+                          {tiposSiniestro.find((t) => String(t.id) === form.tipoSiniestroId)?.nombre}
+                        </span>
+                        <span className="mx-2 text-slate-300">|</span>
+                        <span className="text-slate-500">Estatus: </span>
+                        <span className="font-medium text-slate-700">
+                          {estatusSiniestro.find((e) => String(e.id) === form.estatusSiniestroId)?.nombre || '— Sin asignar —'}
+                        </span>
+                      </div>
+                      {puedeReasignarTipo && (
+                        <button
+                          type="button"
+                          onClick={() => setEditandoTipo(true)}
+                          className="text-xs text-brand-700 hover:underline whitespace-nowrap ml-3"
+                        >
+                          Cambiar
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Tipo de Siniestro</label>
+                        <select value={form.tipoSiniestroId}
+                          onChange={(e) => setForm({ ...form, tipoSiniestroId: e.target.value, estatusSiniestroId: '' })}
+                          className="w-full border rounded px-3 py-2 text-sm">
+                          <option value="">— Sin asignar —</option>
+                          {tiposSiniestro.map((t) => (
+                            <option key={t.id} value={t.id}>{t.nombre}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Estatus del Siniestro</label>
+                        <select value={form.estatusSiniestroId}
+                          disabled={!form.tipoSiniestroId}
+                          onChange={(e) => setForm({ ...form, estatusSiniestroId: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100">
+                          <option value="">— Sin asignar —</option>
+                          {estatusSiniestro.map((e) => (
+                            <option key={e.id} value={e.id}>{e.nombre}</option>
+                          ))}
+                        </select>
+                        {!form.tipoSiniestroId && (
+                          <p className="text-xs text-slate-400 mt-1">Seleccione primero el Tipo de Siniestro.</p>
+                        )}
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditandoTipo(false)}
+                          className="text-xs text-slate-400 hover:text-slate-600"
+                        >
+                          Cancelar cambio de tipo
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Estatus de Cobro al Cliente</label>
+                    <select value={form.estatusCobroClienteId}
+                      onChange={(e) => setForm({ ...form, estatusCobroClienteId: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm">
+                      <option value="">— Sin asignar —</option>
+                      {estatusCobroCliente.map((e) => (
+                        <option key={e.id} value={e.id}>{e.nombre}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Taller Asignado</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Taller</label>
+                    <select value={form.tallerId}
+                      onChange={(e) => setForm({
+                        ...form,
+                        tallerId: e.target.value,
+                        tallerCiudadId: '',
+                        puntoAtencionTallerId: '',
+                      })}
+                      className="w-full border rounded px-3 py-2 text-sm">
+                      <option value="">— Sin asignar —</option>
+                      {talleres.map((t) => (
+                        <option key={t.id} value={t.id}>{t.nombre}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Ciudad del Taller</label>
+                    <select value={form.tallerCiudadId}
+                      disabled={!form.tallerId}
+                      onChange={(e) => setForm({ ...form, tallerCiudadId: e.target.value, puntoAtencionTallerId: '' })}
+                      className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100">
+                      <option value="">— Sin asignar —</option>
+                      {ciudadesTaller.map((tc) => (
+                        <option key={tc.id} value={tc.id}>{tc.ciudad?.nombre}</option>
+                      ))}
+                    </select>
+                    {!form.tallerId && (
+                      <p className="text-xs text-slate-400 mt-1">Seleccione primero el Taller.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Punto de Atención</label>
+                    <select value={form.puntoAtencionTallerId}
+                      disabled={!form.tallerCiudadId}
+                      onChange={(e) => setForm({ ...form, puntoAtencionTallerId: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100">
+                      <option value="">— Sin asignar —</option>
+                      {puntosAtencion.map((p) => (
+                        <option key={p.id} value={p.id}>{p.nombre}</option>
+                      ))}
+                    </select>
+                    {!form.tallerCiudadId && (
+                      <p className="text-xs text-slate-400 mt-1">Seleccione primero la Ciudad del Taller.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-4 sm:gap-6 text-sm">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={form.tieneCotizacion}
+                    onChange={(e) => setForm({ ...form, tieneCotizacion: e.target.checked })} />
+                  ¿Tiene cotización del siniestro?
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={form.movilizadoGrua}
+                    onChange={(e) => setForm({ ...form, movilizadoGrua: e.target.checked })} />
+                  ¿Vehículo movilizado en grúa?
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Notas</label>
+                <textarea value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm" rows={2} />
+              </div>
+
+              {siniestro.tiempos && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-sm">
+                  <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Tiempo A</p><p className="font-semibold">{siniestro.tiempos.tiempoA ?? '-'}</p></div>
+                  <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Tiempo B</p><p className="font-semibold">{siniestro.tiempos.tiempoB ?? '-'}</p></div>
+                  <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Tiempo C</p><p className="font-semibold">{siniestro.tiempos.tiempoC ?? '-'}</p></div>
+                  <div className="bg-slate-100 rounded p-2"><p className="text-xs text-slate-500">Total</p><p className="font-semibold">{siniestro.tiempos.tiempoTotal ?? '-'}</p></div>
+                </div>
+              )}
+
+              {mensaje && <p className="text-sm text-brand-700">{mensaje}</p>}
+
+              <button onClick={actualizar} className="w-full sm:w-auto bg-brand-700 text-white text-sm px-5 py-2.5 rounded">
+                Actualizar Siniestro
+              </button>
+            </div>
+          )}
+
+          {/* ---------- Pestaña: Bitácora ---------- */}
+          {tab === 'bitacora' && (
+            <div>
+              {cargandoHistorial ? (
+                <p className="text-sm text-slate-500">Cargando historial…</p>
+              ) : historial.length === 0 ? (
+                <p className="text-sm text-slate-500">No hay historial disponible para este siniestro.</p>
+              ) : (
+                <ul className="divide-y">
+                  {historial.map((h: any) => (
+                    <li key={h.id} className="py-2 flex justify-between text-sm">
+                      <span className="text-slate-700">{h.estatusNombre || h.descripcion}</span>
+                      <span className="text-slate-400">{formatFecha(h.fecha || h.createdAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
