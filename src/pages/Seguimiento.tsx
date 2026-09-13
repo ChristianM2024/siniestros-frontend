@@ -19,8 +19,8 @@ type TabId = 'cliente' | 'gestion' | 'bitacora';
 export function Seguimiento() {
   const { usuario } = useAuth();
 
-  // ---- Control de quién puede reasignar el Tipo/Estatus de un siniestro
-  //      que ya tiene tipo asignado. AJUSTA los valores de comparación aquí
+  // ---- Control de quién puede reasignar el Tipo/Subtipo de un siniestro
+  //      que ya lo tiene. AJUSTA los valores de comparación aquí
   //      si tu campo `rolNombre` usa otro texto exacto (ej. "Administrador"). ----
   const rol = (usuario?.rolNombre || '').toLowerCase();
   const puedeReasignarTipo = rol.includes('admin') || rol.includes('supervisor');
@@ -32,13 +32,13 @@ export function Seguimiento() {
   const [mensaje, setMensaje] = useState('');
   const [tab, setTab] = useState<TabId>('cliente');
 
-  // ---- Controla si se muestran los combos de Tipo/Estatus dentro de
+  // ---- Controla si se muestran los combos de Tipo/Subtipo dentro de
   //      "Datos de Gestión" para un siniestro que ya tiene tipo asignado
   //      (solo alcanzable vía el botón "Cambiar", visible solo para
   //      admin/supervisor) ----
   const [editandoTipo, setEditandoTipo] = useState(false);
 
-  // ---- Guardado de la pantalla de asignación inicial (Tipo + Estatus) ----
+  // ---- Guardado de la pantalla de asignación inicial (Tipo + Subtipo) ----
   const [asignando, setAsignando] = useState(false);
 
   // ---- Catálogos que se cargan una sola vez ----
@@ -66,6 +66,28 @@ export function Seguimiento() {
     puntoAtencionTallerId: '',
     tieneCotizacion: false,
     movilizadoGrua: false,
+
+    // --- NUEVO: KPI / Fechas de proceso (Tipo Simple) ---
+    fechaLlegadaRepuestos: '',
+    fechaAuditoria: '',
+    fechaFiniquito: '',
+    fechaSalidaTaller: '',
+
+    // --- NUEVO: Valores (Tipo Simple) ---
+    valorSiniestroAntesIva: '',
+    valorAseguradoVehiculo: '',
+    valorDeducible: '', // se calculará con una fórmula más adelante
+    esCandidatoPerdidaTotal: false,
+
+    // --- NUEVO: Cobro al Cliente (Tipo Simple) ---
+    fechaNotifCobroCliente: '',
+    noOrdenServicioCobroCliente: '',
+
+    // --- NUEVO: Vehículo Sustituto (Tipo Simple) ---
+    seEntregoVehiculoSustituto: false,
+    fechaHoraEntregaSustituto: '',
+    horasReclamoHastaEntrega: '', // se calculará con una fórmula más adelante
+    fechaRetiroSustituto: '',
   });
 
   async function cargarLista() {
@@ -159,10 +181,30 @@ export function Seguimiento() {
       puntoAtencionTallerId: s.puntoAtencionTallerId ? String(s.puntoAtencionTallerId) : '',
       tieneCotizacion: !!s.tieneCotizacion,
       movilizadoGrua: !!s.movilizadoGrua,
+
+      // --- NUEVO ---
+      fechaLlegadaRepuestos: s.fechaLlegadaRepuestos?.slice(0, 10) || '',
+      fechaAuditoria: s.fechaAuditoria?.slice(0, 10) || '',
+      fechaFiniquito: s.fechaFiniquito?.slice(0, 10) || '',
+      fechaSalidaTaller: s.fechaSalidaTaller?.slice(0, 10) || '',
+
+      valorSiniestroAntesIva: s.valorSiniestroAntesIva ?? '',
+      valorAseguradoVehiculo: s.valorAseguradoVehiculo ?? '',
+      valorDeducible: s.valorDeducible ?? '',
+      esCandidatoPerdidaTotal: !!s.esCandidatoPerdidaTotal,
+
+      fechaNotifCobroCliente: s.fechaNotifCobroCliente?.slice(0, 10) || '',
+      noOrdenServicioCobroCliente: s.noOrdenServicioCobroCliente || '',
+
+      seEntregoVehiculoSustituto: !!s.seEntregoVehiculoSustituto,
+      // datetime-local necesita yyyy-MM-ddTHH:mm (16 caracteres), no solo la fecha
+      fechaHoraEntregaSustituto: s.fechaHoraEntregaSustituto?.slice(0, 16) || '',
+      horasReclamoHastaEntrega: s.horasReclamoHastaEntrega ?? '',
+      fechaRetiroSustituto: s.fechaRetiroSustituto?.slice(0, 10) || '',
     });
   }
 
-  // ---- Guarda SOLO Tipo + Estatus de Siniestro (pantalla de asignación inicial,
+  // ---- Guarda SOLO Tipo + Subtipo de Siniestro (pantalla de asignación inicial,
   //      o reasignación desde "Cambiar" para admin/supervisor) ----
   async function asignarTipo() {
     if (!siniestro) return;
@@ -201,6 +243,28 @@ export function Seguimiento() {
         puntoAtencionTallerId: form.puntoAtencionTallerId ? Number(form.puntoAtencionTallerId) : undefined,
         tieneCotizacion: form.tieneCotizacion,
         movilizadoGrua: form.movilizadoGrua,
+
+        // --- NUEVO: KPI / Fechas de proceso ---
+        fechaLlegadaRepuestos: form.fechaLlegadaRepuestos || undefined,
+        fechaAuditoria: form.fechaAuditoria || undefined,
+        fechaFiniquito: form.fechaFiniquito || undefined,
+        fechaSalidaTaller: form.fechaSalidaTaller || undefined,
+
+        // --- NUEVO: Valores ---
+        valorSiniestroAntesIva: form.valorSiniestroAntesIva !== '' ? Number(form.valorSiniestroAntesIva) : undefined,
+        valorAseguradoVehiculo: form.valorAseguradoVehiculo !== '' ? Number(form.valorAseguradoVehiculo) : undefined,
+        valorDeducible: form.valorDeducible !== '' ? Number(form.valorDeducible) : undefined,
+        esCandidatoPerdidaTotal: form.esCandidatoPerdidaTotal,
+
+        // --- NUEVO: Cobro al Cliente ---
+        fechaNotifCobroCliente: form.fechaNotifCobroCliente || undefined,
+        noOrdenServicioCobroCliente: form.noOrdenServicioCobroCliente || undefined,
+
+        // --- NUEVO: Vehículo Sustituto ---
+        seEntregoVehiculoSustituto: form.seEntregoVehiculoSustituto,
+        fechaHoraEntregaSustituto: form.fechaHoraEntregaSustituto || undefined,
+        horasReclamoHastaEntrega: form.horasReclamoHastaEntrega !== '' ? Number(form.horasReclamoHastaEntrega) : undefined,
+        fechaRetiroSustituto: form.fechaRetiroSustituto || undefined,
       };
       const { data } = await api.patch(`/siniestros/${siniestro.id}/seguimiento`, payload);
       setSiniestro(data);
@@ -253,6 +317,13 @@ export function Seguimiento() {
 
   const tieneTipoAsignado = !!siniestro?.tipoSiniestroId;
 
+  // ---- Los 4 grupos nuevos (KPI/Fechas, Valores, Cobro al Cliente,
+  //      Vehículo Sustituto) solo aplican al Tipo de Siniestro "Simple"
+  //      (código '001', igual que en siniestros.routes.ts). Ajusta esta
+  //      comparación si el código real en tu base es distinto. ----
+  const tipoSiniestroActual = tiposSiniestro.find((t) => String(t.id) === form.tipoSiniestroId);
+  const esTipoSimple = tipoSiniestroActual?.codigo === '001';
+
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-xl font-semibold mb-1">Seguimiento de Siniestros</h1>
@@ -280,7 +351,7 @@ export function Seguimiento() {
                 <th className="px-4 py-2">Placa</th>
                 <th className="px-4 py-2">Conductor</th>
                 <th className="px-4 py-2">Tipo</th>
-                <th className="px-4 py-2">Estatus</th>
+                <th className="px-4 py-2">Subtipo</th>
                 <th className="px-4 py-2">Fecha</th>
               </tr>
             </thead>
@@ -314,7 +385,7 @@ export function Seguimiento() {
 
       {/* ================= PANTALLA DE ASIGNACIÓN INICIAL =================
           Se muestra cuando el siniestro seleccionado todavía NO tiene
-          Tipo de Siniestro asignado. Solo pide Tipo + Estatus y, al guardar,
+          Tipo de Siniestro asignado. Solo pide Tipo + Subtipo y, al guardar,
           pasa automáticamente a la vista completa de pestañas. */}
       {siniestro && !tieneTipoAsignado && (
         <div className="bg-white rounded-lg shadow p-4">
@@ -328,7 +399,7 @@ export function Seguimiento() {
           </div>
 
           <p className="text-sm text-slate-500 mb-4">
-            Asigna el Tipo y Estatus de Siniestro para habilitar el resto de los datos de gestión.
+            Asigna el Tipo y Subtipo de Siniestro para habilitar el resto de los datos de gestión.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
@@ -345,7 +416,7 @@ export function Seguimiento() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">Estatus del Siniestro</label>
+              <label className="block text-sm font-medium mb-1">Subtipo de Siniestro</label>
               <select value={form.estatusSiniestroId}
                 disabled={!form.tipoSiniestroId}
                 onChange={(e) => setForm({ ...form, estatusSiniestroId: e.target.value })}
@@ -390,7 +461,7 @@ export function Seguimiento() {
                 <p className="font-medium text-slate-700">{siniestro.tipoSiniestro?.nombre || '— Sin asignar —'}</p>
               </div>
               <div className="text-right text-xs">
-                <p className="text-slate-400">Estado del siniestro</p>
+                <p className="text-slate-400">Subtipo de Siniestro</p>
                 <p className="font-medium text-slate-700">{siniestro.estatusSiniestro?.nombre || '— Sin asignar —'}</p>
               </div>
               <div className="text-right text-xs">
@@ -461,7 +532,7 @@ export function Seguimiento() {
                     </div>
                   ))}
 
-                  {/* Tipo y Estatus del Siniestro: ya asignados -> se muestran como
+                  {/* Tipo y Subtipo del Siniestro: ya asignados -> se muestran como
                       consulta (ya se ven arriba en el encabezado). El botón
                       "Cambiar" para reasignar SOLO aparece para admin/supervisor;
                       un operador nunca ve los combos aquí. */}
@@ -473,7 +544,7 @@ export function Seguimiento() {
                           {tiposSiniestro.find((t) => String(t.id) === form.tipoSiniestroId)?.nombre}
                         </span>
                         <span className="mx-2 text-slate-300">|</span>
-                        <span className="text-slate-500">Estatus: </span>
+                        <span className="text-slate-500">Subtipo: </span>
                         <span className="font-medium text-slate-700">
                           {estatusSiniestro.find((e) => String(e.id) === form.estatusSiniestroId)?.nombre || '— Sin asignar —'}
                         </span>
@@ -503,7 +574,7 @@ export function Seguimiento() {
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium mb-1">Estatus del Siniestro</label>
+                        <label className="block text-sm font-medium mb-1">Subtipo de Siniestro</label>
                         <select value={form.estatusSiniestroId}
                           disabled={!form.tipoSiniestroId}
                           onChange={(e) => setForm({ ...form, estatusSiniestroId: e.target.value })}
@@ -610,6 +681,118 @@ export function Seguimiento() {
                   ¿Vehículo movilizado en grúa?
                 </label>
               </div>
+
+              {/* ================= NUEVO: grupos exclusivos del Tipo "Simple" =================
+                  Se muestran solo cuando el siniestro es Tipo "Simple" (código '001').
+                  Los otros 7 tipos aún no tienen sus campos definidos (pendiente de
+                  sesión anterior); cuando se definan, este mismo patrón condicional
+                  se repite con el código de cada tipo. */}
+              {esTipoSimple && (
+                <>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">KPI / Fechas de Proceso</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {[
+                        ['fechaLlegadaRepuestos', 'Fecha de llegada de repuestos'],
+                        ['fechaAuditoria', 'Fecha de auditoría'],
+                        ['fechaFiniquito', 'Fecha de finiquito'],
+                        ['fechaSalidaTaller', 'Fecha de salida de taller'],
+                      ].map(([key, label]) => (
+                        <div key={key}>
+                          <label className="block text-sm font-medium mb-1">{label}</label>
+                          <input type="date" value={(form as any)[key]}
+                            onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Valores</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Valor del siniestro antes de IVA</label>
+                        <input type="number" step="0.01" value={form.valorSiniestroAntesIva}
+                          onChange={(e) => setForm({ ...form, valorSiniestroAntesIva: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Valor asegurado del vehículo</label>
+                        <input type="number" step="0.01" value={form.valorAseguradoVehiculo}
+                          onChange={(e) => setForm({ ...form, valorAseguradoVehiculo: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Valor deducible</label>
+                        <input type="number" step="0.01" value={form.valorDeducible}
+                          onChange={(e) => setForm({ ...form, valorDeducible: e.target.value })}
+                          placeholder="Se calculará automáticamente (fórmula pendiente)"
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.esCandidatoPerdidaTotal}
+                            onChange={(e) => setForm({ ...form, esCandidatoPerdidaTotal: e.target.checked })} />
+                          ¿Es candidato a pérdida total?
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Cobro al Cliente</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha notificación cobro al cliente</label>
+                        <input type="date" value={form.fechaNotifCobroCliente}
+                          onChange={(e) => setForm({ ...form, fechaNotifCobroCliente: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">No. de orden de servicio cobro al cliente</label>
+                        <input type="text" value={form.noOrdenServicioCobroCliente}
+                          onChange={(e) => setForm({ ...form, noOrdenServicioCobroCliente: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Vehículo Sustituto</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.seEntregoVehiculoSustituto}
+                            onChange={(e) => setForm({ ...form, seEntregoVehiculoSustituto: e.target.checked })} />
+                          ¿Se entregó vehículo sustituto?
+                        </label>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha/hora de entrega del sustituto</label>
+                        <input type="datetime-local" value={form.fechaHoraEntregaSustituto}
+                          disabled={!form.seEntregoVehiculoSustituto}
+                          onChange={(e) => setForm({ ...form, fechaHoraEntregaSustituto: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Horas desde el reclamo hasta la entrega</label>
+                        <input type="number" step="0.01" value={form.horasReclamoHastaEntrega}
+                          onChange={(e) => setForm({ ...form, horasReclamoHastaEntrega: e.target.value })}
+                          placeholder="Se calculará automáticamente (fórmula pendiente)"
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha de retiro del sustituto</label>
+                        <input type="date" value={form.fechaRetiroSustituto}
+                          disabled={!form.seEntregoVehiculoSustituto}
+                          onChange={(e) => setForm({ ...form, fechaRetiroSustituto: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div>
                 <label className="block text-sm font-medium mb-1">Notas</label>
