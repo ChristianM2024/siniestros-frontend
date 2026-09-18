@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, FilePlus, Search, Database, Car, Users, LogOut, Menu, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import isirentLogo from '../assets/isirent-logo-png.png';
+import { LayoutDashboard, FilePlus, Search, Database, Car, Users, LogOut, Menu, X, KeyRound } from 'lucide-react';
 
 const ICONOS: Record<string, React.ElementType> = {
   LayoutDashboard,
@@ -50,6 +50,20 @@ export function Layout() {
               </NavLink>
             );
           })}
+
+          {/* No viene de "pantallas": cambiar la propia contraseña no depende de permisos por rol */}
+          <NavLink
+            to="/perfil/password"
+            onClick={() => setMenuAbierto(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-2 px-3 py-2 rounded text-sm transition ${
+                isActive ? 'bg-white/15 font-medium' : 'hover:bg-white/10'
+              }`
+            }
+          >
+            <KeyRound size={16} /> Contraseña
+          </NavLink>
+
           <button
             onClick={logout}
             className="flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white text-sm w-full"
@@ -83,6 +97,18 @@ export function Layout() {
               </NavLink>
             );
           })}
+
+          {/* No viene de "pantallas": cambiar la propia contraseña no depende de permisos por rol */}
+          <NavLink
+            to="/perfil/password"
+            className={({ isActive }) =>
+              `flex items-center gap-2 px-3 py-2 rounded text-sm transition ${
+                isActive ? 'bg-white/15 font-medium' : 'hover:bg-white/10'
+              }`
+            }
+          >
+            <KeyRound size={16} /> Contraseña
+          </NavLink>
         </nav>
 
         <div className="p-3 border-t border-white/10 text-sm">

@@ -13,6 +13,7 @@ import { Auditoria } from './pages/Auditoria';
 import EnvioFormulario from './pages/EnvioFormulario';
 import ReportarSiniestroPublico from './pages/ReportarSiniestroPublico';
 import Mantenimiento from './pages/Mantenimiento';
+import CambiarPassword from './pages/CambiarPassword';
 
 export default function App() {
   return (
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/admin/usuarios" element={<ProtectedRoute pantalla="usuarios"><Usuarios /></ProtectedRoute>} />
             {/* Antes: no existía ninguna <Route> para auditoria */}
             <Route path="/admin/auditoria" element={<ProtectedRoute pantalla="auditoria"><Auditoria /></ProtectedRoute>} />
+            <Route path="/perfil/password" element={<CambiarPassword />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

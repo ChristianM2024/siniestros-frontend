@@ -47,7 +47,12 @@ export function BaseDatos() {
                   <td className="px-3 py-2">{s.vehiculo?.placa}</td>
                   <td className="px-3 py-2">{s.conductor}</td>
                   <td className="px-3 py-2">
-                    <span className="px-2 py-0.5 rounded text-xs bg-slate-100">{s.estado.replace('_', ' ')}</span>
+                    {/* Antes: s.estado.replace('_', ' ') — 'estado' era el enum EstadoSiniestro,
+                        eliminado del schema. Ahora el estatus viene del catálogo dinámico
+                        EstatusSiniestro, vía la relación estatusSiniestro. */}
+                    <span className="px-2 py-0.5 rounded text-xs bg-slate-100">
+                      {s.estatusSiniestro?.nombre ?? 'Sin estatus'}
+                    </span>
                   </td>
                   <td className="px-3 py-2">{s.tiempos?.tiempoTotal ?? '-'}</td>
                 </tr>
