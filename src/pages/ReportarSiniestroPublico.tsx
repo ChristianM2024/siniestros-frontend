@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent, ChangeEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Upload, X, Loader2 } from 'lucide-react';
 import { apiPublico } from '../api/client';
+import logoIsirent from '../assets/isirent-logo-png.png';
 
 interface InfoVehiculo {
   placa: string;
@@ -213,7 +214,7 @@ export default function ReportarSiniestroPublico() {
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-lg mx-auto px-4 py-8">
         <div className="flex justify-center mb-6">
-          <img src="/logo-isirent.png" alt="isirent" className="h-9" />
+          <img src={logoIsirent} alt="isirent" className="h-9" />
         </div>
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-slate-900">Reporte de siniestro</h1>
