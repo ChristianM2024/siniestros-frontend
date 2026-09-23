@@ -212,6 +212,9 @@ export default function ReportarSiniestroPublico() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-lg mx-auto px-4 py-8">
+        <div className="flex justify-center mb-6">
+          <img src="/logo-isirent.png" alt="isirent" className="h-9" />
+        </div>
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-slate-900">Reporte de siniestro</h1>
           {vehiculo && (

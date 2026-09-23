@@ -35,6 +35,7 @@ export default function EnvioFormulario() {
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [resultado, setResultado] = useState<RespuestaEnvio | null>(null);
   const [copiado, setCopiado] = useState(false);
+  const [errorCopiado, setErrorCopiado] = useState(false);
 
   async function buscarVehiculo(e: FormEvent) {
   e.preventDefault();
@@ -108,9 +109,47 @@ export default function EnvioFormulario() {
 
   async function copiarLink() {
     if (!resultado) return;
-    await navigator.clipboard.writeText(linkCompleto(resultado.token));
-    setCopiado(true);
-    setTimeout(() => setCopiado(false), 2000);
+    const link = linkCompleto(resultado.token);
+    setErrorCopiado(false);
+
+    try {
+      // navigator.clipboard solo existe en contexto seguro (https o localhost).
+      // En el VPS por http plano no está disponible -> hay que usar el fallback.
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        throw new Error('Clipboard API no disponible en este contexto');
+      }
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      // Fallback: input temporal + execCommand('copy'), funciona también en http
+      const textarea = document.createElement('textarea');
+      textarea.value = link;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+
+      let copiadoOk = false;
+      try {
+        copiadoOk = document.execCommand('copy');
+      } catch {
+        copiadoOk = false;
+      }
+      document.body.removeChild(textarea);
+
+      if (copiadoOk) {
+        setCopiado(true);
+        setTimeout(() => setCopiado(false), 2000);
+      } else {
+        // Ni la Clipboard API ni el fallback funcionaron: avisamos para que copien a mano
+        setErrorCopiado(true);
+        setTimeout(() => setErrorCopiado(false), 3000);
+      }
+    }
   }
 
   function reiniciar() {
@@ -312,7 +351,7 @@ export default function EnvioFormulario() {
               className="text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1 shrink-0"
             >
               <Copy className="w-3.5 h-3.5" />
-              {copiado ? 'Copiado' : 'Copiar'}
+              {copiado ? 'Copiado' : errorCopiado ? 'Selecciona y copia manual' : 'Copiar'}
             </button>
           </div>
 
