@@ -14,7 +14,203 @@ function formatBooleano(valor?: boolean) {
   return valor ? 'Sí' : 'No';
 }
 
+function formatFechaHora(valor?: string) {
+  if (!valor) return null;
+  const d = new Date(valor);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleString();
+}
+
+// ---- Bitácora / Auditoría ----
+// Etiquetas legibles para los campos más consultados en el historial de cambios.
+// Si un campo no está en este mapa, se usa un fallback automático (separa camelCase).
+const ETIQUETAS_CAMPO: Record<string, string> = {
+  tipoSiniestroId: 'Tipo de Siniestro',
+  estatusSiniestroId: 'Subtipo de Siniestro',
+  estatusCobroClienteId: 'Estatus de Cobro al Cliente',
+  tallerCiudadId: 'Taller / Ciudad',
+  puntoAtencionTallerId: 'Punto de Atención',
+  notas: 'Notas',
+  fechaNotifAseg: 'Fecha Notif. Aseg.',
+  fechaIngresoTaller: 'Fecha Ingreso Taller',
+  fechaProforma: 'Fecha Proforma',
+  fechaAutorizacion: 'Fecha Autorizacion',
+  fechaEntrega: 'Fecha Entrega',
+  valorSiniestroAntesIva: 'Valor del siniestro antes de IVA',
+  valorAseguradoVehiculo: 'Valor asegurado del vehículo',
+  numeroEventoCliente: 'Número de evento del cliente',
+  valorDeducible: 'Valor deducible',
+  esCandidatoPerdidaTotal: '¿Es candidato a pérdida total?',
+  fechaNotifCobroCliente: 'Fecha notificación cobro al cliente',
+  noOrdenServicioCobroCliente: 'No. de orden de servicio',
+  seEntregoVehiculoSustituto: '¿Se entregó vehículo sustituto?',
+  fechaHoraEntregaSustituto: 'Fecha/hora de entrega del sustituto',
+  fechaRetiroSustituto: 'Fecha de retiro del sustituto',
+  placaTercero: 'Placa del tercero',
+  marcaModeloTercero: 'Marca / Modelo del tercero',
+  nombreTerceroCausante: 'Nombre del tercero causante',
+  terceroAfectoPoliza: '¿Tercero afectó su póliza?',
+  causalDetencion: 'Causal de detención',
+  abogadoAsignado: 'Abogado asignado',
+};
+
+function etiquetaCampo(campo: string): string {
+  if (ETIQUETAS_CAMPO[campo]) return ETIQUETAS_CAMPO[campo];
+  // Fallback: "fechaSalidaTaller" -> "Fecha Salida Taller"
+  return campo
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+function formatValorAuditoria(valor: any): string {
+  if (valor === null || valor === undefined || valor === '') return '—';
+  if (typeof valor === 'boolean') return valor ? 'Sí' : 'No';
+  return String(valor);
+}
+
+const ETIQUETAS_ACCION: Record<string, string> = {
+  CREATE: 'Creación',
+  UPDATE: 'Actualización',
+  DELETE: 'Eliminación',
+};
+
+// ======================= Fórmulas de negocio =======================
+// Funciones puras: reciben el `form` actual y devuelven el valor calculado
+// (o null si todavía faltan datos para calcular). Se usan tanto para mostrar
+// el valor en pantalla (siempre bloqueado/no editable) como para armar el
+// payload que se envía al backend en `actualizar()`.
+
+function diasEntre(fechaFin?: string, fechaInicio?: string): number | null {
+  if (!fechaFin || !fechaInicio) return null;
+  const f1 = new Date(fechaFin);
+  const f0 = new Date(fechaInicio);
+  if (isNaN(f1.getTime()) || isNaN(f0.getTime())) return null;
+  return Math.round((f1.getTime() - f0.getTime()) / 86400000);
+}
+
+function horasEntre(fechaFin?: string, fechaInicio?: string): number | null {
+  if (!fechaFin || !fechaInicio) return null;
+  const f1 = new Date(fechaFin);
+  const f0 = new Date(fechaInicio);
+  if (isNaN(f1.getTime()) || isNaN(f0.getTime())) return null;
+  return Math.round(((f1.getTime() - f0.getTime()) / 3600000) * 100) / 100;
+}
+
+// Días en taller = Fecha_Salida_Taller - Fecha_Ingreso_Taller
+function calcDiasTaller(form: any): number | null {
+  return diasEntre(form.fechaSalidaTaller, form.fechaIngresoTaller);
+}
+
+// Total tiempo siniestro = Fecha_Salida_Taller - Fecha_Aviso_Siniestro (Fecha Notif. Aseg.)
+function calcTotalTiempoSiniestro(form: any): number | null {
+  return diasEntre(form.fechaSalidaTaller, form.fechaNotifAseg);
+}
+
+// Valor deducible = MAX(%evento * Valor_Siniestro, %evento_min * Valor_Asegurado, monto_minimo)
+// según Número de evento del cliente (1°, 2° o 3°)
+const TIERS_DEDUCIBLE: Record<string, { pct: number; pctMin: number; piso: number }> = {
+  '1': { pct: 0.10, pctMin: 0.01, piso: 300 },
+  '2': { pct: 0.125, pctMin: 0.0125, piso: 500 },
+  '3': { pct: 0.15, pctMin: 0.015, piso: 750 },
+};
+function calcValorDeducible(form: any): number | null {
+  const tier = TIERS_DEDUCIBLE[form.numeroEventoCliente];
+  if (!tier || form.valorSiniestroAntesIva === '' || form.valorAseguradoVehiculo === '') return null;
+  const valorSiniestro = Number(form.valorSiniestroAntesIva);
+  const valorAsegurado = Number(form.valorAseguradoVehiculo);
+  const valor = Math.max(tier.pct * valorSiniestro, tier.pctMin * valorAsegurado, tier.piso);
+  return Math.round(valor * 100) / 100;
+}
+
+// Valor pendiente de indemnización P.T. 2 = Valor_Asegurado - Valor_Indemnizado_PT1
+function calcValorPendienteIndemnizacionPT2(form: any): number | null {
+  if (form.valorAseguradoVehiculo === '' || form.valorIndemnizadoPT1 === '') return null;
+  return Number(form.valorAseguradoVehiculo) - Number(form.valorIndemnizadoPT1);
+}
+
+// ¿Es candidato a pérdida total? = Valor_Siniestro > 75% del Valor_Asegurado
+function calcEsCandidatoPerdidaTotal(form: any): boolean {
+  if (form.valorSiniestroAntesIva === '' || form.valorAseguradoVehiculo === '') return false;
+  return Number(form.valorSiniestroAntesIva) > 0.75 * Number(form.valorAseguradoVehiculo);
+}
+
+// Deducible por robo de componentes electrónicos = 20% del Valor_Siniestro
+function calcDeducibleRoboComponentesElectronicos(form: any): number | null {
+  if (form.valorSiniestroAntesIva === '') return null;
+  return Math.round(0.20 * Number(form.valorSiniestroAntesIva) * 100) / 100;
+}
+
+// % de avance del checklist = documentos en "Entregada" / total de documentos del checklist
+const CAMPOS_CHECKLIST_DOCUMENTOS = [
+  'docCuvFinal', 'docCertificadoGravamen', 'docOriginalMatricula', 'docCopiaCiPvRucRl',
+  'docComprobantePagoMatricula', 'docOriginalCopiaLlave', 'docCopiaFacturaVenta', 'docVehiculoSinMultas',
+];
+function calcPorcentajeAvanceChecklist(form: any): number {
+  const completados = CAMPOS_CHECKLIST_DOCUMENTOS.filter((k) => form[k] === 'Entregada').length;
+  return Math.round((completados / CAMPOS_CHECKLIST_DOCUMENTOS.length) * 10000) / 100;
+}
+
+// Cobertura Tasa Spatt por ocupante lesionado: $2,000 si el vehículo vale hasta $45,000; si no, $3,000
+// (se usa el "Valor asegurado del vehículo" como Valor_Vehiculo — ver nota al usuario)
+function calcCoberturaTasaSpattOcupanteLesionado(form: any): number | null {
+  if (form.valorAseguradoVehiculo === '') return null;
+  return Number(form.valorAseguradoVehiculo) <= 45000 ? 2000 : 3000;
+}
+
+// Cobertura todo riesgo por fallecido: $7,000 hasta $45,000 de valor; $10,000 si supera ese valor
+function calcCoberturaTodoRiesgoFallecido(form: any): number | null {
+  if (form.valorAseguradoVehiculo === '') return null;
+  return Number(form.valorAseguradoVehiculo) <= 45000 ? 7000 : 10000;
+}
+
+// Montos fijos de política (no se multiplican por número de personas)
+const GASTOS_FUNERARIOS_FIJO = 400;
+const GASTOS_AMBULANCIA_FIJO = 200;
+
+// Límite seguro todo riesgo si supera Tasa Spatt: $30,000 si el vehículo vale menos de $45,000; si no, $50,000
+function calcLimiteSeguroTodoRiesgoSiSuperaSpatt(form: any): number | null {
+  if (form.valorAseguradoVehiculo === '') return null;
+  return Number(form.valorAseguradoVehiculo) < 45000 ? 30000 : 50000;
+}
+
+// Horas desde el reclamo hasta la entrega = (Fecha_Entrega_Sustituto - Fecha_Reclamo) en horas
+function calcHorasReclamoHastaEntrega(form: any): number | null {
+  return horasEntre(form.fechaHoraEntregaSustituto, form.fechaHoraReclamo);
+}
+
+// ¿Cumple KPI de 6 horas del vehículo sustituto?
+function calcCumpleKpi6Horas(form: any): string | null {
+  const horas = calcHorasReclamoHastaEntrega(form);
+  if (horas === null) return null;
+  return horas <= 6 ? 'En KPI' : 'Fuera de KPI';
+}
+
 type TabId = 'cliente' | 'gestion' | 'bitacora';
+
+// ---- Opciones de los combos "Selección" del grupo Pérdida Total ----
+const OPCIONES_CHECKLIST_4 = ['Pendiente', 'Solicitado', 'En proceso', 'Entregada'];
+const OPCIONES_PENDIENTE_OK = ['Pendiente', 'OK'];
+
+// ---- Códigos de Tipo de Siniestro (ver Mantenimiento → Tipos de Siniestro) ----
+const CODIGO_SIMPLE = '001';
+const CODIGO_RC_USUARIO_AFECTA_TERCERO = '002'; // Siniestro con RC donde usuario afecta a tercero
+const CODIGO_RC_ASEGURADORA_TERCERO = '003'; // Siniestro con RC atendido por aseguradora del tercero
+const CODIGO_NO_CULPOSO_SIN_POLIZA_TERCERO = '004'; // Siniestro no culposo sin afectación de póliza tercero
+const CODIGO_PERDIDA_TOTAL_DANIOS = '005'; // Siniestro posible pérdida total por daños
+const CODIGO_PERDIDA_TOTAL_ROBO = '006'; // Siniestro posible pérdida total por robo
+const CODIGO_DETENCION_HERIDOS_TERCERO = '007'; // Siniestro con detención y personas heridas o fallecidas donde se afecta a un tercero
+const CODIGO_DETENCION_HERIDOS_USUARIO = '008'; // Siniestro con detención y personas heridas o fallecidas donde el tercero es quien afecta a usuario ISIRENT
+
+// ---- Opciones del combo "Causal de detención" (grupo Legal / Vehículo Detenido, Tipo 007) ----
+const OPCIONES_CAUSAL_DETENCION = [
+  'Daños terceros/propios',
+  'Lesionados',
+  'Fallecidos',
+  'Embriaguez',
+  'Daños propiedad pública',
+  'Abandono',
+  'Robo recuperado',
+];
 
 export function Seguimiento() {
   const { usuario } = useAuth();
@@ -67,27 +263,119 @@ export function Seguimiento() {
     tieneCotizacion: false,
     movilizadoGrua: false,
 
-    // --- NUEVO: KPI / Fechas de proceso (Tipo Simple) ---
+    // --- KPI / Fechas de proceso (Tipo Simple y RC usuario afecta a tercero) ---
     fechaLlegadaRepuestos: '',
     fechaAuditoria: '',
     fechaFiniquito: '',
     fechaSalidaTaller: '',
 
-    // --- NUEVO: Valores (Tipo Simple) ---
+    // --- Valores ---
     valorSiniestroAntesIva: '',
     valorAseguradoVehiculo: '',
-    valorDeducible: '', // se calculará con una fórmula más adelante
-    esCandidatoPerdidaTotal: false,
+    numeroEventoCliente: '', // 1, 2 o 3 — usado para calcular el Valor deducible
+    valorDeducible: '', // calculado: ver calcValorDeducible()
+    esCandidatoPerdidaTotal: false, // calculado: ver calcEsCandidatoPerdidaTotal()
 
-    // --- NUEVO: Cobro al Cliente (Tipo Simple) ---
+    // --- Cobro al Cliente ---
     fechaNotifCobroCliente: '',
     noOrdenServicioCobroCliente: '',
 
-    // --- NUEVO: Vehículo Sustituto (Tipo Simple) ---
+    // --- Vehículo Sustituto ---
     seEntregoVehiculoSustituto: false,
+    fechaHoraReclamo: '', // usado para calcular Horas desde el reclamo hasta la entrega
     fechaHoraEntregaSustituto: '',
-    horasReclamoHastaEntrega: '', // se calculará con una fórmula más adelante
+    horasReclamoHastaEntrega: '', // calculado: ver calcHorasReclamoHastaEntrega()
     fechaRetiroSustituto: '',
+
+    // --- Datos del Tercero (Tipos 002, 003 y 004) ---
+    placaTercero: '',
+    marcaModeloTercero: '',
+    nombreTerceroCausante: '',
+    terceroAfectoPoliza: false,
+
+    // --- Datos del Tercero adicionales (solo Tipo 003) ---
+    aseguradoraTercero: '',
+    polizaTercero: '',
+    tallerTerceroEstadia: '',
+
+    // --- Valores adicionales (solo Tipo 005) ---
+    valorIndemnizadoPT1: '',
+    valorPendienteIndemnizacionPT2: '', // se calculará con una fórmula más adelante
+
+    // --- Pérdida Total - Proceso (solo Tipo 005) ---
+    motivoPerdidaTotal: '',
+    fechaDeclaratoriaPerdidaTotal: '',
+    solicitudCambioEstatusKimerasoft: false,
+    fechaSolicitudCambioEstatusKimerasoft: '',
+    notificacionRetiroSustitutoPT: '',
+    gestionRenovacionVehiculo: '',
+    fechaRetiroSustitutoPT: '',
+
+    // --- Pérdida Total - Prenda bancaria (solo Tipo 005) ---
+    entregaEstadoFinancieroBancoPrenda: false,
+    nombreBancoPrenda: '',
+    fechaSolicitudLiberacionPrenda: '',
+    cartaLevantamientoPrendaBanco: '',
+    tramiteLiberacionPrenda: '',
+    entregaChequeFinanciero: '',
+
+    // --- Pérdida Total - Documentos (solo Tipo 005) ---
+    docCuvFinal: '',
+    docCertificadoGravamen: '',
+    docOriginalMatricula: '',
+    docCopiaCiPvRucRl: '',
+    docComprobantePagoMatricula: '',
+    docOriginalCopiaLlave: '',
+    docCopiaFacturaVenta: '',
+    docVehiculoSinMultas: '',
+    entregaDocumentosBroker: '',
+    porcentajeAvanceChecklist: '', // se calculará con una fórmula más adelante
+
+    // --- Pérdida Total - Notaría y cierre (Tipos 005 y 006) ---
+    firmaContratoCompraVentaNotaria: '',
+    fechaPagoPerdidaTotal: '',
+    cambioEstatusPTotal: '',
+    cambioEstatusFinalTotalVendido: false,
+
+    // --- Robo (solo Tipo 006) ---
+    fechaDenunciaRobo: '',
+    numeroDenuncia: '',
+    vehiculoRecuperado: false,
+    fechaRecuperacion: '',
+    vehiculoDetenidoTrasRecuperacion: false,
+    estadoVehiculoRecuperado: '',
+    deducibleRoboComponentesElectronicos: '', // se calculará con una fórmula más adelante
+
+    // --- KPI reducido (solo Tipo 007) ---
+    totalTiempoSiniestro: '', // se calculará con una fórmula más adelante
+
+    // --- Legal / Vehículo Detenido (solo Tipo 007) ---
+    causalDetencion: '',
+    requiereAcompanamientoAbogadoPenal: false,
+    confirmacionAcompanamientoAbogadoPenal: '',
+    abogadoAsignado: '',
+    fechaSeguimientoPartePolicial: '',
+    fechaEnvioParteBroker: '',
+    fechaAsignacionFiscalia: '',
+    fechaOrdenLiberacion: '',
+    valorCancelarParqueadero: '',
+    valorCancelarGrua: '',
+    fechaLiberacionVehiculo: '',
+    seguimientoIndemnizacionTercero: '', // solo Tipo 007
+    seguimientoIndemnizacionUsuario: '', // solo Tipo 008
+
+    // --- Tasa Spatt / Heridos-Fallecidos (solo Tipo 007) ---
+    hayPersonasLesionadas: false,
+    numeroOcupantesLesionados: '',
+    coberturaTasaSpattOcupanteLesionado: '', // se calculará con una fórmula más adelante
+    hayPersonasFallecidas: false,
+    numeroFallecidos: '',
+    coberturaTodoRiesgoFallecido: '', // se calculará con una fórmula más adelante
+    gastosFunerariosFallecido: '', // se calculará con una fórmula más adelante
+    gastosAmbulancia: '', // se calculará con una fórmula más adelante
+    limiteSeguroTodoRiesgoSiSuperaSpatt: '', // se calculará con una fórmula más adelante
+    historiaClinicaSolicitada: false,
+    fechaPagoFacturasTasaSpatt: '',
   });
 
   async function cargarLista() {
@@ -182,7 +470,6 @@ export function Seguimiento() {
       tieneCotizacion: !!s.tieneCotizacion,
       movilizadoGrua: !!s.movilizadoGrua,
 
-      // --- NUEVO ---
       fechaLlegadaRepuestos: s.fechaLlegadaRepuestos?.slice(0, 10) || '',
       fechaAuditoria: s.fechaAuditoria?.slice(0, 10) || '',
       fechaFiniquito: s.fechaFiniquito?.slice(0, 10) || '',
@@ -190,6 +477,7 @@ export function Seguimiento() {
 
       valorSiniestroAntesIva: s.valorSiniestroAntesIva ?? '',
       valorAseguradoVehiculo: s.valorAseguradoVehiculo ?? '',
+      numeroEventoCliente: s.numeroEventoCliente ? String(s.numeroEventoCliente) : '',
       valorDeducible: s.valorDeducible ?? '',
       esCandidatoPerdidaTotal: !!s.esCandidatoPerdidaTotal,
 
@@ -198,9 +486,89 @@ export function Seguimiento() {
 
       seEntregoVehiculoSustituto: !!s.seEntregoVehiculoSustituto,
       // datetime-local necesita yyyy-MM-ddTHH:mm (16 caracteres), no solo la fecha
+      fechaHoraReclamo: s.fechaHoraReclamo?.slice(0, 16) || '',
       fechaHoraEntregaSustituto: s.fechaHoraEntregaSustituto?.slice(0, 16) || '',
       horasReclamoHastaEntrega: s.horasReclamoHastaEntrega ?? '',
       fechaRetiroSustituto: s.fechaRetiroSustituto?.slice(0, 10) || '',
+
+      placaTercero: s.placaTercero || '',
+      marcaModeloTercero: s.marcaModeloTercero || '',
+      nombreTerceroCausante: s.nombreTerceroCausante || '',
+      terceroAfectoPoliza: !!s.terceroAfectoPoliza,
+
+      aseguradoraTercero: s.aseguradoraTercero || '',
+      polizaTercero: s.polizaTercero || '',
+      tallerTerceroEstadia: s.tallerTerceroEstadia || '',
+
+      valorIndemnizadoPT1: s.valorIndemnizadoPT1 ?? '',
+      valorPendienteIndemnizacionPT2: s.valorPendienteIndemnizacionPT2 ?? '',
+
+      motivoPerdidaTotal: s.motivoPerdidaTotal || '',
+      fechaDeclaratoriaPerdidaTotal: s.fechaDeclaratoriaPerdidaTotal?.slice(0, 10) || '',
+      solicitudCambioEstatusKimerasoft: !!s.solicitudCambioEstatusKimerasoft,
+      fechaSolicitudCambioEstatusKimerasoft: s.fechaSolicitudCambioEstatusKimerasoft?.slice(0, 10) || '',
+      notificacionRetiroSustitutoPT: s.notificacionRetiroSustitutoPT?.slice(0, 10) || '',
+      gestionRenovacionVehiculo: s.gestionRenovacionVehiculo || '',
+      fechaRetiroSustitutoPT: s.fechaRetiroSustitutoPT?.slice(0, 10) || '',
+
+      entregaEstadoFinancieroBancoPrenda: !!s.entregaEstadoFinancieroBancoPrenda,
+      nombreBancoPrenda: s.nombreBancoPrenda || '',
+      fechaSolicitudLiberacionPrenda: s.fechaSolicitudLiberacionPrenda?.slice(0, 10) || '',
+      cartaLevantamientoPrendaBanco: s.cartaLevantamientoPrendaBanco || '',
+      tramiteLiberacionPrenda: s.tramiteLiberacionPrenda || '',
+      entregaChequeFinanciero: s.entregaChequeFinanciero || '',
+
+      docCuvFinal: s.docCuvFinal || '',
+      docCertificadoGravamen: s.docCertificadoGravamen || '',
+      docOriginalMatricula: s.docOriginalMatricula || '',
+      docCopiaCiPvRucRl: s.docCopiaCiPvRucRl || '',
+      docComprobantePagoMatricula: s.docComprobantePagoMatricula || '',
+      docOriginalCopiaLlave: s.docOriginalCopiaLlave || '',
+      docCopiaFacturaVenta: s.docCopiaFacturaVenta || '',
+      docVehiculoSinMultas: s.docVehiculoSinMultas || '',
+      entregaDocumentosBroker: s.entregaDocumentosBroker || '',
+      porcentajeAvanceChecklist: s.porcentajeAvanceChecklist ?? '',
+
+      firmaContratoCompraVentaNotaria: s.firmaContratoCompraVentaNotaria || '',
+      fechaPagoPerdidaTotal: s.fechaPagoPerdidaTotal?.slice(0, 10) || '',
+      cambioEstatusPTotal: s.cambioEstatusPTotal || '',
+      cambioEstatusFinalTotalVendido: !!s.cambioEstatusFinalTotalVendido,
+
+      fechaDenunciaRobo: s.fechaDenunciaRobo?.slice(0, 10) || '',
+      numeroDenuncia: s.numeroDenuncia || '',
+      vehiculoRecuperado: !!s.vehiculoRecuperado,
+      fechaRecuperacion: s.fechaRecuperacion?.slice(0, 10) || '',
+      vehiculoDetenidoTrasRecuperacion: !!s.vehiculoDetenidoTrasRecuperacion,
+      estadoVehiculoRecuperado: s.estadoVehiculoRecuperado || '',
+      deducibleRoboComponentesElectronicos: s.deducibleRoboComponentesElectronicos ?? '',
+
+      totalTiempoSiniestro: s.totalTiempoSiniestro ?? '',
+
+      causalDetencion: s.causalDetencion || '',
+      requiereAcompanamientoAbogadoPenal: !!s.requiereAcompanamientoAbogadoPenal,
+      confirmacionAcompanamientoAbogadoPenal: s.confirmacionAcompanamientoAbogadoPenal?.slice(0, 10) || '',
+      abogadoAsignado: s.abogadoAsignado || '',
+      fechaSeguimientoPartePolicial: s.fechaSeguimientoPartePolicial?.slice(0, 10) || '',
+      fechaEnvioParteBroker: s.fechaEnvioParteBroker?.slice(0, 10) || '',
+      fechaAsignacionFiscalia: s.fechaAsignacionFiscalia?.slice(0, 10) || '',
+      fechaOrdenLiberacion: s.fechaOrdenLiberacion?.slice(0, 10) || '',
+      valorCancelarParqueadero: s.valorCancelarParqueadero ?? '',
+      valorCancelarGrua: s.valorCancelarGrua ?? '',
+      fechaLiberacionVehiculo: s.fechaLiberacionVehiculo?.slice(0, 10) || '',
+      seguimientoIndemnizacionTercero: s.seguimientoIndemnizacionTercero || '',
+      seguimientoIndemnizacionUsuario: s.seguimientoIndemnizacionUsuario || '',
+
+      hayPersonasLesionadas: !!s.hayPersonasLesionadas,
+      numeroOcupantesLesionados: s.numeroOcupantesLesionados ?? '',
+      coberturaTasaSpattOcupanteLesionado: s.coberturaTasaSpattOcupanteLesionado ?? '',
+      hayPersonasFallecidas: !!s.hayPersonasFallecidas,
+      numeroFallecidos: s.numeroFallecidos ?? '',
+      coberturaTodoRiesgoFallecido: s.coberturaTodoRiesgoFallecido ?? '',
+      gastosFunerariosFallecido: s.gastosFunerariosFallecido ?? '',
+      gastosAmbulancia: s.gastosAmbulancia ?? '',
+      limiteSeguroTodoRiesgoSiSuperaSpatt: s.limiteSeguroTodoRiesgoSiSuperaSpatt ?? '',
+      historiaClinicaSolicitada: !!s.historiaClinicaSolicitada,
+      fechaPagoFacturasTasaSpatt: s.fechaPagoFacturasTasaSpatt?.slice(0, 10) || '',
     });
   }
 
@@ -244,27 +612,119 @@ export function Seguimiento() {
         tieneCotizacion: form.tieneCotizacion,
         movilizadoGrua: form.movilizadoGrua,
 
-        // --- NUEVO: KPI / Fechas de proceso ---
+        // --- KPI / Fechas de proceso ---
         fechaLlegadaRepuestos: form.fechaLlegadaRepuestos || undefined,
         fechaAuditoria: form.fechaAuditoria || undefined,
         fechaFiniquito: form.fechaFiniquito || undefined,
         fechaSalidaTaller: form.fechaSalidaTaller || undefined,
 
-        // --- NUEVO: Valores ---
+        // --- Valores ---
         valorSiniestroAntesIva: form.valorSiniestroAntesIva !== '' ? Number(form.valorSiniestroAntesIva) : undefined,
         valorAseguradoVehiculo: form.valorAseguradoVehiculo !== '' ? Number(form.valorAseguradoVehiculo) : undefined,
-        valorDeducible: form.valorDeducible !== '' ? Number(form.valorDeducible) : undefined,
-        esCandidatoPerdidaTotal: form.esCandidatoPerdidaTotal,
+        numeroEventoCliente: form.numeroEventoCliente ? Number(form.numeroEventoCliente) : undefined,
+        valorDeducible: calcValorDeducible(form) ?? undefined, // calculado
+        esCandidatoPerdidaTotal: calcEsCandidatoPerdidaTotal(form), // calculado
+        diasTaller: calcDiasTaller(form) ?? undefined, // calculado
 
-        // --- NUEVO: Cobro al Cliente ---
+        // --- Cobro al Cliente ---
         fechaNotifCobroCliente: form.fechaNotifCobroCliente || undefined,
         noOrdenServicioCobroCliente: form.noOrdenServicioCobroCliente || undefined,
 
-        // --- NUEVO: Vehículo Sustituto ---
+        // --- Vehículo Sustituto ---
         seEntregoVehiculoSustituto: form.seEntregoVehiculoSustituto,
+        fechaHoraReclamo: form.fechaHoraReclamo || undefined,
         fechaHoraEntregaSustituto: form.fechaHoraEntregaSustituto || undefined,
-        horasReclamoHastaEntrega: form.horasReclamoHastaEntrega !== '' ? Number(form.horasReclamoHastaEntrega) : undefined,
+        horasReclamoHastaEntrega: calcHorasReclamoHastaEntrega(form) ?? undefined, // calculado
+        cumpleKpi6Horas: calcCumpleKpi6Horas(form) ?? undefined, // calculado
         fechaRetiroSustituto: form.fechaRetiroSustituto || undefined,
+
+        // --- Datos del Tercero ---
+        placaTercero: form.placaTercero || undefined,
+        marcaModeloTercero: form.marcaModeloTercero || undefined,
+        nombreTerceroCausante: form.nombreTerceroCausante || undefined,
+        terceroAfectoPoliza: form.terceroAfectoPoliza,
+        aseguradoraTercero: form.aseguradoraTercero || undefined,
+        polizaTercero: form.polizaTercero || undefined,
+        tallerTerceroEstadia: form.tallerTerceroEstadia || undefined,
+
+        // --- Valores adicionales (Tipo 005) ---
+        valorIndemnizadoPT1: form.valorIndemnizadoPT1 !== '' ? Number(form.valorIndemnizadoPT1) : undefined,
+        valorPendienteIndemnizacionPT2: calcValorPendienteIndemnizacionPT2(form) ?? undefined, // calculado
+
+        // --- Pérdida Total - Proceso ---
+        motivoPerdidaTotal: form.motivoPerdidaTotal || undefined,
+        fechaDeclaratoriaPerdidaTotal: form.fechaDeclaratoriaPerdidaTotal || undefined,
+        solicitudCambioEstatusKimerasoft: form.solicitudCambioEstatusKimerasoft,
+        fechaSolicitudCambioEstatusKimerasoft: form.fechaSolicitudCambioEstatusKimerasoft || undefined,
+        notificacionRetiroSustitutoPT: form.notificacionRetiroSustitutoPT || undefined,
+        gestionRenovacionVehiculo: form.gestionRenovacionVehiculo || undefined,
+        fechaRetiroSustitutoPT: form.fechaRetiroSustitutoPT || undefined,
+
+        // --- Pérdida Total - Prenda bancaria ---
+        entregaEstadoFinancieroBancoPrenda: form.entregaEstadoFinancieroBancoPrenda,
+        nombreBancoPrenda: form.nombreBancoPrenda || undefined,
+        fechaSolicitudLiberacionPrenda: form.fechaSolicitudLiberacionPrenda || undefined,
+        cartaLevantamientoPrendaBanco: form.cartaLevantamientoPrendaBanco || undefined,
+        tramiteLiberacionPrenda: form.tramiteLiberacionPrenda || undefined,
+        entregaChequeFinanciero: form.entregaChequeFinanciero || undefined,
+
+        // --- Pérdida Total - Documentos ---
+        docCuvFinal: form.docCuvFinal || undefined,
+        docCertificadoGravamen: form.docCertificadoGravamen || undefined,
+        docOriginalMatricula: form.docOriginalMatricula || undefined,
+        docCopiaCiPvRucRl: form.docCopiaCiPvRucRl || undefined,
+        docComprobantePagoMatricula: form.docComprobantePagoMatricula || undefined,
+        docOriginalCopiaLlave: form.docOriginalCopiaLlave || undefined,
+        docCopiaFacturaVenta: form.docCopiaFacturaVenta || undefined,
+        docVehiculoSinMultas: form.docVehiculoSinMultas || undefined,
+        entregaDocumentosBroker: form.entregaDocumentosBroker || undefined,
+        porcentajeAvanceChecklist: calcPorcentajeAvanceChecklist(form), // calculado
+
+        // --- Pérdida Total - Notaría y cierre ---
+        firmaContratoCompraVentaNotaria: form.firmaContratoCompraVentaNotaria || undefined,
+        fechaPagoPerdidaTotal: form.fechaPagoPerdidaTotal || undefined,
+        cambioEstatusPTotal: form.cambioEstatusPTotal || undefined,
+        cambioEstatusFinalTotalVendido: form.cambioEstatusFinalTotalVendido,
+
+        // --- Robo (Tipo 006) ---
+        fechaDenunciaRobo: form.fechaDenunciaRobo || undefined,
+        numeroDenuncia: form.numeroDenuncia || undefined,
+        vehiculoRecuperado: form.vehiculoRecuperado,
+        fechaRecuperacion: form.fechaRecuperacion || undefined,
+        vehiculoDetenidoTrasRecuperacion: form.vehiculoDetenidoTrasRecuperacion,
+        estadoVehiculoRecuperado: form.estadoVehiculoRecuperado || undefined,
+        deducibleRoboComponentesElectronicos: calcDeducibleRoboComponentesElectronicos(form) ?? undefined, // calculado
+
+        // --- KPI reducido (Tipos 007/008) ---
+        totalTiempoSiniestro: calcTotalTiempoSiniestro(form) ?? undefined, // calculado
+
+        // --- Legal / Vehículo Detenido (Tipo 007) ---
+        causalDetencion: form.causalDetencion || undefined,
+        requiereAcompanamientoAbogadoPenal: form.requiereAcompanamientoAbogadoPenal,
+        confirmacionAcompanamientoAbogadoPenal: form.confirmacionAcompanamientoAbogadoPenal || undefined,
+        abogadoAsignado: form.abogadoAsignado || undefined,
+        fechaSeguimientoPartePolicial: form.fechaSeguimientoPartePolicial || undefined,
+        fechaEnvioParteBroker: form.fechaEnvioParteBroker || undefined,
+        fechaAsignacionFiscalia: form.fechaAsignacionFiscalia || undefined,
+        fechaOrdenLiberacion: form.fechaOrdenLiberacion || undefined,
+        valorCancelarParqueadero: form.valorCancelarParqueadero !== '' ? Number(form.valorCancelarParqueadero) : undefined,
+        valorCancelarGrua: form.valorCancelarGrua !== '' ? Number(form.valorCancelarGrua) : undefined,
+        fechaLiberacionVehiculo: form.fechaLiberacionVehiculo || undefined,
+        seguimientoIndemnizacionTercero: form.seguimientoIndemnizacionTercero || undefined,
+        seguimientoIndemnizacionUsuario: form.seguimientoIndemnizacionUsuario || undefined,
+
+        // --- Tasa Spatt / Heridos-Fallecidos (Tipos 007/008) ---
+        hayPersonasLesionadas: form.hayPersonasLesionadas,
+        numeroOcupantesLesionados: form.numeroOcupantesLesionados !== '' ? Number(form.numeroOcupantesLesionados) : undefined,
+        coberturaTasaSpattOcupanteLesionado: calcCoberturaTasaSpattOcupanteLesionado(form) ?? undefined, // calculado
+        hayPersonasFallecidas: form.hayPersonasFallecidas,
+        numeroFallecidos: form.numeroFallecidos !== '' ? Number(form.numeroFallecidos) : undefined,
+        coberturaTodoRiesgoFallecido: calcCoberturaTodoRiesgoFallecido(form) ?? undefined, // calculado
+        gastosFunerariosFallecido: GASTOS_FUNERARIOS_FIJO, // monto fijo de política
+        gastosAmbulancia: GASTOS_AMBULANCIA_FIJO, // monto fijo de política
+        limiteSeguroTodoRiesgoSiSuperaSpatt: calcLimiteSeguroTodoRiesgoSiSuperaSpatt(form) ?? undefined, // calculado
+        historiaClinicaSolicitada: form.historiaClinicaSolicitada,
+        fechaPagoFacturasTasaSpatt: form.fechaPagoFacturasTasaSpatt || undefined,
       };
       const { data } = await api.patch(`/siniestros/${siniestro.id}/seguimiento`, payload);
       setSiniestro(data);
@@ -317,12 +777,40 @@ export function Seguimiento() {
 
   const tieneTipoAsignado = !!siniestro?.tipoSiniestroId;
 
-  // ---- Los 4 grupos nuevos (KPI/Fechas, Valores, Cobro al Cliente,
-  //      Vehículo Sustituto) solo aplican al Tipo de Siniestro "Simple"
-  //      (código '001', igual que en siniestros.routes.ts). Ajusta esta
-  //      comparación si el código real en tu base es distinto. ----
+  // ---- Qué grupos de campos se muestran según el Tipo de Siniestro ----
+  //  - Los grupos KPI / Valores / Cobro al Cliente / Vehículo Sustituto aplican
+  //    a los Tipos 001 (Simple), 002 (RC usuario afecta a tercero), 003 (RC atendido por aseguradora
+  //    del tercero) y 004 (no culposo sin afectación de póliza tercero).
+  //  - El grupo "Datos del Tercero" aplica a 002, 003 y 004 (los mismos 4 campos base);
+  //    los 3 campos extra (aseguradora, póliza, taller/estadía) solo al 003.
+  //  Cuando se definan los otros tipos, se agrega su código aquí.
   const tipoSiniestroActual = tiposSiniestro.find((t) => String(t.id) === form.tipoSiniestroId);
-  const esTipoSimple = tipoSiniestroActual?.codigo === '001';
+  const esTipoSimple = tipoSiniestroActual?.codigo === CODIGO_SIMPLE;
+  const esRcUsuarioAfectaTercero = tipoSiniestroActual?.codigo === CODIGO_RC_USUARIO_AFECTA_TERCERO;
+  const esRcAseguradoraTercero = tipoSiniestroActual?.codigo === CODIGO_RC_ASEGURADORA_TERCERO;
+  const esNoCulposoSinPolizaTercero = tipoSiniestroActual?.codigo === CODIGO_NO_CULPOSO_SIN_POLIZA_TERCERO;
+  const esPerdidaTotalDanios = tipoSiniestroActual?.codigo === CODIGO_PERDIDA_TOTAL_DANIOS;
+  const esPerdidaTotalRobo = tipoSiniestroActual?.codigo === CODIGO_PERDIDA_TOTAL_ROBO;
+  const esDetencionHeridosTercero = tipoSiniestroActual?.codigo === CODIGO_DETENCION_HERIDOS_TERCERO;
+  const esDetencionHeridosUsuario = tipoSiniestroActual?.codigo === CODIGO_DETENCION_HERIDOS_USUARIO;
+  // Los 4 grupos "Pérdida Total - ..." (Proceso, Prenda bancaria, Documentos, Notaría y cierre)
+  // son idénticos en 005 y 006; el 006 además agrega el grupo "Robo".
+  const esAlgunaPerdidaTotal = esPerdidaTotalDanios || esPerdidaTotalRobo;
+  // Los Tipos 007 y 008 comparten el mismo "esqueleto" reducido del Tipo Simple (no muestran
+  // Taller Asignado, reducen KPI a un solo campo fórmula y Valores a un solo campo, mantienen
+  // Vehículo Sustituto igual que el Tipo Simple, y agregan los grupos "Legal / Vehículo Detenido"
+  // y "Tasa Spatt / Heridos-Fallecidos"). La única diferencia entre ambos es el campo de
+  // "Seguimiento indemnización..." dentro de "Legal / Vehículo Detenido": el 007 hace
+  // seguimiento a la indemnización AL TERCERO, el 008 la hace AL USUARIO ISIRENT.
+  const esAlgunaDetencionHeridos = esDetencionHeridosTercero || esDetencionHeridosUsuario;
+  const mostrarCamposSimple =
+    esTipoSimple || esRcUsuarioAfectaTercero || esRcAseguradoraTercero ||
+    esNoCulposoSinPolizaTercero || esAlgunaPerdidaTotal || esAlgunaDetencionHeridos;
+  const mostrarTallerAsignado = !esAlgunaDetencionHeridos;
+  const mostrarVehiculoSustituto = mostrarCamposSimple;
+  const mostrarDatosTercero =
+    esRcUsuarioAfectaTercero || esRcAseguradoraTercero || esNoCulposoSinPolizaTercero ||
+    esAlgunaDetencionHeridos;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -615,6 +1103,8 @@ export function Seguimiento() {
                 </div>
               </div>
 
+              {/* Taller Asignado: no aplica al Tipo 007 (detención con heridos/fallecidos afectando a tercero). */}
+              {mostrarTallerAsignado && (
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Taller Asignado</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -668,6 +1158,7 @@ export function Seguimiento() {
                   </div>
                 </div>
               </div>
+              )}
 
               <div className="flex flex-wrap gap-4 sm:gap-6 text-sm">
                 <label className="flex items-center gap-2">
@@ -682,32 +1173,143 @@ export function Seguimiento() {
                 </label>
               </div>
 
-              {/* ================= NUEVO: grupos exclusivos del Tipo "Simple" =================
-                  Se muestran solo cuando el siniestro es Tipo "Simple" (código '001').
-                  Los otros 7 tipos aún no tienen sus campos definidos (pendiente de
-                  sesión anterior); cuando se definan, este mismo patrón condicional
-                  se repite con el código de cada tipo. */}
-              {esTipoSimple && (
-                <>
-                  <div>
-                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">KPI / Fechas de Proceso</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {[
-                        ['fechaLlegadaRepuestos', 'Fecha de llegada de repuestos'],
-                        ['fechaAuditoria', 'Fecha de auditoría'],
-                        ['fechaFiniquito', 'Fecha de finiquito'],
-                        ['fechaSalidaTaller', 'Fecha de salida de taller'],
-                      ].map(([key, label]) => (
-                        <div key={key}>
-                          <label className="block text-sm font-medium mb-1">{label}</label>
-                          <input type="date" value={(form as any)[key]}
-                            onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+              {/* ================= Datos del Tercero =================
+                  Tipos 002, 003 y 004. Los 3 últimos campos (aseguradora, póliza, taller/estadía)
+                  solo se muestran en el 003 (RC atendido por aseguradora del tercero). */}
+              {mostrarDatosTercero && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Datos del Tercero</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Placa del tercero</label>
+                      <input type="text" value={form.placaTercero}
+                        onChange={(e) => setForm({ ...form, placaTercero: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Marca / Modelo del tercero</label>
+                      <input type="text" value={form.marcaModeloTercero}
+                        onChange={(e) => setForm({ ...form, marcaModeloTercero: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Nombre del tercero causante</label>
+                      <input type="text" value={form.nombreTerceroCausante}
+                        onChange={(e) => setForm({ ...form, nombreTerceroCausante: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm" />
+                    </div>
+                    {!esAlgunaDetencionHeridos && (
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.terceroAfectoPoliza}
+                            onChange={(e) => setForm({ ...form, terceroAfectoPoliza: e.target.checked })} />
+                          ¿Tercero afectó su póliza?
+                        </label>
+                      </div>
+                    )}
+                    {esRcAseguradoraTercero && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Aseguradora del tercero</label>
+                          <input type="text" value={form.aseguradoraTercero}
+                            onChange={(e) => setForm({ ...form, aseguradoraTercero: e.target.value })}
                             className="w-full border rounded px-3 py-2 text-sm" />
                         </div>
-                      ))}
-                    </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Póliza del tercero</label>
+                          <input type="text" value={form.polizaTercero}
+                            onChange={(e) => setForm({ ...form, polizaTercero: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm" />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-sm font-medium mb-1">Taller del tercero / estadía provisional</label>
+                          <input type="text" value={form.tallerTerceroEstadia}
+                            onChange={(e) => setForm({ ...form, tallerTerceroEstadia: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm" />
+                        </div>
+                      </>
+                    )}
                   </div>
+                </div>
+              )}
 
+              {/* ================= Grupos de los Tipos 001, 002, 003, 004, 005 y 006 =================
+                  KPI / Valores / Cobro al Cliente / Vehículo Sustituto.
+                  En 005 y 006 (posible pérdida total) no se muestran Fecha de finiquito ni
+                  Fecha de salida de taller (ver filtro más abajo), y se agregan 2 campos
+                  extra en Valores. Cuando se definan los otros tipos, se repite este patrón. */}
+              {mostrarCamposSimple && (
+                <>
+                  {/* KPI / Fechas de Proceso: los Tipos 007 y 008 lo reducen a un único campo (fórmula). */}
+                  {esAlgunaDetencionHeridos ? (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase mb-2">KPI / Fechas de Proceso</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Fecha de salida de taller</label>
+                          <input type="date" value={form.fechaSalidaTaller}
+                            onChange={(e) => setForm({ ...form, fechaSalidaTaller: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm" />
+                          <p className="text-xs text-slate-400 mt-1">Necesaria para calcular el Total tiempo siniestro.</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Total tiempo siniestro (días)</label>
+                          <input type="number" step="0.01" value={calcTotalTiempoSiniestro(form) ?? ''} disabled
+                            placeholder="Falta Fecha Notif. Aseg. / Fecha de salida de taller"
+                            className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase mb-2">KPI / Fechas de Proceso</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {[
+                          ['fechaLlegadaRepuestos', 'Fecha de llegada de repuestos'],
+                          ['fechaAuditoria', 'Fecha de auditoría'],
+                          // Fecha de finiquito y Fecha de salida de taller no aplican a los Tipos 005/006
+                          // (posible pérdida total: el vehículo no vuelve al flujo normal de reparación).
+                          ...(esAlgunaPerdidaTotal ? [] : [
+                            ['fechaFiniquito', 'Fecha de finiquito'],
+                            ['fechaSalidaTaller', 'Fecha de salida de taller'],
+                          ]),
+                        ].map(([key, label]) => (
+                          <div key={key}>
+                            <label className="block text-sm font-medium mb-1">{label}</label>
+                            <input type="date" value={(form as any)[key]}
+                              onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                              className="w-full border rounded px-3 py-2 text-sm" />
+                          </div>
+                        ))}
+                        {/* Días en taller: solo tiene sentido cuando se captura Fecha de salida de taller
+                            (no aplica a 005/006, posible pérdida total). */}
+                        {!esAlgunaPerdidaTotal && (
+                          <div>
+                            <label className="block text-sm font-medium mb-1">Días en taller</label>
+                            <input type="number" step="0.01" value={calcDiasTaller(form) ?? ''} disabled
+                              placeholder="Falta Fecha Ingreso Taller / Fecha de salida de taller"
+                              className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Valores: los Tipos 007 y 008 lo reducen a "Valor asegurado del vehículo" (viene de la ficha del vehículo). */}
+                  {esAlgunaDetencionHeridos ? (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Valores</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Valor asegurado del vehículo</label>
+                          <input type="number" step="0.01" value={form.valorAseguradoVehiculo}
+                            onChange={(e) => setForm({ ...form, valorAseguradoVehiculo: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm" />
+                          <p className="text-xs text-slate-400 mt-1">Viene de la ficha del vehículo.</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
                   <div>
                     <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Valores</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -724,21 +1326,48 @@ export function Seguimiento() {
                           className="w-full border rounded px-3 py-2 text-sm" />
                       </div>
                       <div>
+                        <label className="block text-sm font-medium mb-1">Número de evento del cliente</label>
+                        <select value={form.numeroEventoCliente}
+                          onChange={(e) => setForm({ ...form, numeroEventoCliente: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          <option value="1">1 — Primer evento</option>
+                          <option value="2">2 — Segundo evento</option>
+                          <option value="3">3 — Tercer evento</option>
+                        </select>
+                        <p className="text-xs text-slate-400 mt-1">Define el % y el piso aplicados al Valor deducible.</p>
+                      </div>
+                      <div>
                         <label className="block text-sm font-medium mb-1">Valor deducible</label>
-                        <input type="number" step="0.01" value={form.valorDeducible}
-                          onChange={(e) => setForm({ ...form, valorDeducible: e.target.value })}
-                          placeholder="Se calculará automáticamente (fórmula pendiente)"
-                          className="w-full border rounded px-3 py-2 text-sm" />
+                        <input type="number" step="0.01" value={calcValorDeducible(form) ?? ''} disabled
+                          placeholder="Falta Valor del siniestro / Valor asegurado / Nº de evento"
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
                       </div>
                       <div className="flex items-end pb-2">
                         <label className="flex items-center gap-2 text-sm">
-                          <input type="checkbox" checked={form.esCandidatoPerdidaTotal}
-                            onChange={(e) => setForm({ ...form, esCandidatoPerdidaTotal: e.target.checked })} />
-                          ¿Es candidato a pérdida total?
+                          <input type="checkbox" checked={calcEsCandidatoPerdidaTotal(form)} disabled />
+                          ¿Es candidato a pérdida total? (calculado: &gt;75% del valor asegurado)
                         </label>
                       </div>
+                      {esAlgunaPerdidaTotal && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium mb-1">Valor indemnizado P.T. 1</label>
+                            <input type="number" step="0.01" value={form.valorIndemnizadoPT1}
+                              onChange={(e) => setForm({ ...form, valorIndemnizadoPT1: e.target.value })}
+                              className="w-full border rounded px-3 py-2 text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium mb-1">Valor pend. indemnización P.T. 2</label>
+                            <input type="number" step="0.01" value={calcValorPendienteIndemnizacionPT2(form) ?? ''} disabled
+                              placeholder="Falta Valor asegurado / Valor indemnizado P.T. 1"
+                              className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
+                  )}
 
                   <div>
                     <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Cobro al Cliente</p>
@@ -758,6 +1387,7 @@ export function Seguimiento() {
                     </div>
                   </div>
 
+                  {mostrarVehiculoSustituto && (
                   <div>
                     <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Vehículo Sustituto</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -769,6 +1399,13 @@ export function Seguimiento() {
                         </label>
                       </div>
                       <div>
+                        <label className="block text-sm font-medium mb-1">Fecha/hora del reclamo</label>
+                        <input type="datetime-local" value={form.fechaHoraReclamo}
+                          disabled={!form.seEntregoVehiculoSustituto}
+                          onChange={(e) => setForm({ ...form, fechaHoraReclamo: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                      </div>
+                      <div>
                         <label className="block text-sm font-medium mb-1">Fecha/hora de entrega del sustituto</label>
                         <input type="datetime-local" value={form.fechaHoraEntregaSustituto}
                           disabled={!form.seEntregoVehiculoSustituto}
@@ -777,10 +1414,15 @@ export function Seguimiento() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium mb-1">Horas desde el reclamo hasta la entrega</label>
-                        <input type="number" step="0.01" value={form.horasReclamoHastaEntrega}
-                          onChange={(e) => setForm({ ...form, horasReclamoHastaEntrega: e.target.value })}
-                          placeholder="Se calculará automáticamente (fórmula pendiente)"
-                          className="w-full border rounded px-3 py-2 text-sm" />
+                        <input type="number" step="0.01" value={calcHorasReclamoHastaEntrega(form) ?? ''} disabled
+                          placeholder="Falta Fecha/hora del reclamo o de entrega"
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">¿Cumple KPI de 6 horas?</label>
+                        <input type="text" value={calcCumpleKpi6Horas(form) ?? ''} disabled
+                          placeholder="Falta Fecha/hora del reclamo o de entrega"
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium mb-1">Fecha de retiro del sustituto</label>
@@ -791,7 +1433,447 @@ export function Seguimiento() {
                       </div>
                     </div>
                   </div>
+                  )}
                 </>
+              )}
+
+              {/* ================= Grupo Legal / Vehículo Detenido y Tasa Spatt / Heridos-Fallecidos =================
+                  Tipos 007 (detención con heridos/fallecidos, afecta a tercero) y 008 (detención
+                  con heridos/fallecidos, el tercero afecta al usuario ISIRENT). Idénticos salvo
+                  el campo "Seguimiento indemnización...": al tercero en el 007, al usuario en el 008. */}
+              {esAlgunaDetencionHeridos && (
+                <>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Legal / Vehículo Detenido</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Causal de detención</label>
+                        <select value={form.causalDetencion}
+                          onChange={(e) => setForm({ ...form, causalDetencion: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          {OPCIONES_CAUSAL_DETENCION.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.requiereAcompanamientoAbogadoPenal}
+                            onChange={(e) => setForm({ ...form, requiereAcompanamientoAbogadoPenal: e.target.checked })} />
+                          ¿Requiere acompañamiento de abogado penal?
+                        </label>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Confirmación acompañamiento abogado penal</label>
+                        <input type="date" value={form.confirmacionAcompanamientoAbogadoPenal}
+                          disabled={!form.requiereAcompanamientoAbogadoPenal}
+                          onChange={(e) => setForm({ ...form, confirmacionAcompanamientoAbogadoPenal: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Abogado asignado</label>
+                        <input type="text" value={form.abogadoAsignado}
+                          onChange={(e) => setForm({ ...form, abogadoAsignado: e.target.value })}
+                          placeholder="Por ciudad"
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha seguimiento parte policial</label>
+                        <input type="date" value={form.fechaSeguimientoPartePolicial}
+                          onChange={(e) => setForm({ ...form, fechaSeguimientoPartePolicial: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha envío parte al broker</label>
+                        <input type="date" value={form.fechaEnvioParteBroker}
+                          onChange={(e) => setForm({ ...form, fechaEnvioParteBroker: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha asignación fiscalía</label>
+                        <input type="date" value={form.fechaAsignacionFiscalia}
+                          onChange={(e) => setForm({ ...form, fechaAsignacionFiscalia: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha orden de liberación</label>
+                        <input type="date" value={form.fechaOrdenLiberacion}
+                          onChange={(e) => setForm({ ...form, fechaOrdenLiberacion: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Valor a cancelar en parqueadero</label>
+                        <input type="number" step="0.01" value={form.valorCancelarParqueadero}
+                          onChange={(e) => setForm({ ...form, valorCancelarParqueadero: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Valor a cancelar en grúa</label>
+                        <input type="number" step="0.01" value={form.valorCancelarGrua}
+                          onChange={(e) => setForm({ ...form, valorCancelarGrua: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha de liberación del vehículo</label>
+                        <input type="date" value={form.fechaLiberacionVehiculo}
+                          onChange={(e) => setForm({ ...form, fechaLiberacionVehiculo: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      {/* Solo Tipo 007: el tercero es el afectado, se le hace seguimiento a su indemnización. */}
+                      {esDetencionHeridosTercero && (
+                        <div className="sm:col-span-2">
+                          <label className="block text-sm font-medium mb-1">Seguimiento indemnización al tercero</label>
+                          <input type="text" value={form.seguimientoIndemnizacionTercero}
+                            onChange={(e) => setForm({ ...form, seguimientoIndemnizacionTercero: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm" />
+                        </div>
+                      )}
+                      {/* Solo Tipo 008: el tercero afecta al usuario ISIRENT, se le hace seguimiento a SU indemnización. */}
+                      {esDetencionHeridosUsuario && (
+                        <div className="sm:col-span-2">
+                          <label className="block text-sm font-medium mb-1">Seguimiento indemnización al usuario</label>
+                          <input type="text" value={form.seguimientoIndemnizacionUsuario}
+                            onChange={(e) => setForm({ ...form, seguimientoIndemnizacionUsuario: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Tasa Spatt / Heridos-Fallecidos</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.hayPersonasLesionadas}
+                            onChange={(e) => setForm({ ...form, hayPersonasLesionadas: e.target.checked })} />
+                          ¿Hay personas lesionadas?
+                        </label>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Número de ocupantes lesionados</label>
+                        <input type="number" value={form.numeroOcupantesLesionados}
+                          disabled={!form.hayPersonasLesionadas}
+                          onChange={(e) => setForm({ ...form, numeroOcupantesLesionados: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Cobertura Tasa Spatt por ocupante lesionado</label>
+                        <input type="number" step="0.01" value={calcCoberturaTasaSpattOcupanteLesionado(form) ?? ''} disabled
+                          placeholder="Falta Valor asegurado del vehículo"
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.hayPersonasFallecidas}
+                            onChange={(e) => setForm({ ...form, hayPersonasFallecidas: e.target.checked })} />
+                          ¿Hay personas fallecidas?
+                        </label>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Número de fallecidos</label>
+                        <input type="number" value={form.numeroFallecidos}
+                          disabled={!form.hayPersonasFallecidas}
+                          onChange={(e) => setForm({ ...form, numeroFallecidos: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Cobertura todo riesgo por fallecido</label>
+                        <input type="number" step="0.01" value={calcCoberturaTodoRiesgoFallecido(form) ?? ''} disabled
+                          placeholder="Falta Valor asegurado del vehículo"
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Gastos funerarios (por fallecido)</label>
+                        <input type="number" step="0.01" value={GASTOS_FUNERARIOS_FIJO} disabled
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Gastos de ambulancia</label>
+                        <input type="number" step="0.01" value={GASTOS_AMBULANCIA_FIJO} disabled
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Límite seguro todo riesgo si supera Spatt</label>
+                        <input type="number" step="0.01" value={calcLimiteSeguroTodoRiesgoSiSuperaSpatt(form) ?? ''} disabled
+                          placeholder="Falta Valor asegurado del vehículo"
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.historiaClinicaSolicitada}
+                            onChange={(e) => setForm({ ...form, historiaClinicaSolicitada: e.target.checked })} />
+                          Historia clínica solicitada
+                        </label>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha pago facturas Tasa Spatt</label>
+                        <input type="date" value={form.fechaPagoFacturasTasaSpatt}
+                          onChange={(e) => setForm({ ...form, fechaPagoFacturasTasaSpatt: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* ================= Grupos compartidos por Tipos 005 y 006 =================
+                  Pérdida Total - Proceso, Prenda bancaria, Documentos, Notaría y cierre.
+                  Idénticos en "posible pérdida total por daños" (005) y "por robo" (006). */}
+              {esAlgunaPerdidaTotal && (
+                <>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Pérdida Total - Proceso</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Motivo</label>
+                        <input type="text" value={form.motivoPerdidaTotal}
+                          onChange={(e) => setForm({ ...form, motivoPerdidaTotal: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha de declaratoria</label>
+                        <input type="date" value={form.fechaDeclaratoriaPerdidaTotal}
+                          onChange={(e) => setForm({ ...form, fechaDeclaratoriaPerdidaTotal: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="flex items-center gap-2 text-sm mb-1">
+                          <input type="checkbox" checked={form.solicitudCambioEstatusKimerasoft}
+                            onChange={(e) => setForm({ ...form, solicitudCambioEstatusKimerasoft: e.target.checked })} />
+                          ¿Solicitud cambio de estatus en Kimerasoft?
+                        </label>
+                        <input type="date" value={form.fechaSolicitudCambioEstatusKimerasoft}
+                          disabled={!form.solicitudCambioEstatusKimerasoft}
+                          onChange={(e) => setForm({ ...form, fechaSolicitudCambioEstatusKimerasoft: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Notificación retiro de sustituto</label>
+                        <input type="date" value={form.notificacionRetiroSustitutoPT}
+                          onChange={(e) => setForm({ ...form, notificacionRetiroSustitutoPT: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Gestión de renovación del vehículo</label>
+                        <input type="text" value={form.gestionRenovacionVehiculo}
+                          onChange={(e) => setForm({ ...form, gestionRenovacionVehiculo: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha de retiro del vehículo sustituto</label>
+                        <input type="date" value={form.fechaRetiroSustitutoPT}
+                          onChange={(e) => setForm({ ...form, fechaRetiroSustitutoPT: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Pérdida Total - Prenda bancaria</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.entregaEstadoFinancieroBancoPrenda}
+                            onChange={(e) => setForm({ ...form, entregaEstadoFinancieroBancoPrenda: e.target.checked })} />
+                          ¿Entrega estado financiero banco con prenda?
+                        </label>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Nombre del banco</label>
+                        <input type="text" value={form.nombreBancoPrenda}
+                          onChange={(e) => setForm({ ...form, nombreBancoPrenda: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha solicitud liberación de prenda</label>
+                        <input type="date" value={form.fechaSolicitudLiberacionPrenda}
+                          onChange={(e) => setForm({ ...form, fechaSolicitudLiberacionPrenda: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Carta levantamiento de prenda del banco</label>
+                        <select value={form.cartaLevantamientoPrendaBanco}
+                          onChange={(e) => setForm({ ...form, cartaLevantamientoPrendaBanco: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          {OPCIONES_CHECKLIST_4.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Trámite de liberación de prenda</label>
+                        <select value={form.tramiteLiberacionPrenda}
+                          onChange={(e) => setForm({ ...form, tramiteLiberacionPrenda: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          {OPCIONES_CHECKLIST_4.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Entrega de cheque a Financiero</label>
+                        <select value={form.entregaChequeFinanciero}
+                          onChange={(e) => setForm({ ...form, entregaChequeFinanciero: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          {OPCIONES_PENDIENTE_OK.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Pérdida Total - Documentos</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {([
+                        ['docCuvFinal', 'CUV Final'],
+                        ['docCertificadoGravamen', 'Certificado de Gravamen'],
+                        ['docOriginalMatricula', 'Original de matrícula'],
+                        ['docCopiaCiPvRucRl', 'Copia C.I., P.V., RUC R.L.'],
+                        ['docComprobantePagoMatricula', 'Comprobante de pago de matrícula'],
+                        ['docOriginalCopiaLlave', 'Original y copia de la llave'],
+                        ['docCopiaFacturaVenta', 'Copia de factura de venta'],
+                        ['docVehiculoSinMultas', 'Vehículo sin multas'],
+                      ] as [string, string][]).map(([key, label]) => (
+                        <div key={key}>
+                          <label className="block text-sm font-medium mb-1">{label}</label>
+                          <select value={(form as any)[key]}
+                            onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                            className="w-full border rounded px-3 py-2 text-sm bg-white">
+                            <option value="">— Sin asignar —</option>
+                            {OPCIONES_CHECKLIST_4.map((op) => (
+                              <option key={op} value={op}>{op}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Entrega de todos los documentos al Broker</label>
+                        <select value={form.entregaDocumentosBroker}
+                          onChange={(e) => setForm({ ...form, entregaDocumentosBroker: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          {OPCIONES_PENDIENTE_OK.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">% de avance del checklist</label>
+                        <input type="number" step="0.01" value={calcPorcentajeAvanceChecklist(form)} disabled
+                          className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Pérdida Total - Notaría y cierre</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Firma contrato compra-venta en notaría</label>
+                        <select value={form.firmaContratoCompraVentaNotaria}
+                          onChange={(e) => setForm({ ...form, firmaContratoCompraVentaNotaria: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          {OPCIONES_PENDIENTE_OK.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Fecha de pago de pérdida total</label>
+                        <input type="date" value={form.fechaPagoPerdidaTotal}
+                          onChange={(e) => setForm({ ...form, fechaPagoPerdidaTotal: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Cambio de estatus a "P. Total"</label>
+                        <select value={form.cambioEstatusPTotal}
+                          onChange={(e) => setForm({ ...form, cambioEstatusPTotal: e.target.value })}
+                          className="w-full border rounded px-3 py-2 text-sm bg-white">
+                          <option value="">— Sin asignar —</option>
+                          {OPCIONES_CHECKLIST_4.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.cambioEstatusFinalTotalVendido}
+                            onChange={(e) => setForm({ ...form, cambioEstatusFinalTotalVendido: e.target.checked })} />
+                          ¿Cambio de estatus final a "Total Vendido"?
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* ================= Grupo Robo =================
+                  Solo para "Siniestro posible pérdida total por robo" (código 006). */}
+              {esPerdidaTotalRobo && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Robo</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Fecha de denuncia de robo</label>
+                      <input type="date" value={form.fechaDenunciaRobo}
+                        onChange={(e) => setForm({ ...form, fechaDenunciaRobo: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Número de denuncia</label>
+                      <input type="text" value={form.numeroDenuncia}
+                        onChange={(e) => setForm({ ...form, numeroDenuncia: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm" />
+                    </div>
+                    <div className="flex items-end pb-2">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={form.vehiculoRecuperado}
+                          onChange={(e) => setForm({ ...form, vehiculoRecuperado: e.target.checked })} />
+                        ¿Vehículo recuperado?
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Fecha de recuperación</label>
+                      <input type="date" value={form.fechaRecuperacion}
+                        disabled={!form.vehiculoRecuperado}
+                        onChange={(e) => setForm({ ...form, fechaRecuperacion: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm disabled:bg-slate-100" />
+                    </div>
+                    <div className="flex items-end pb-2">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={form.vehiculoDetenidoTrasRecuperacion}
+                          disabled={!form.vehiculoRecuperado}
+                          onChange={(e) => setForm({ ...form, vehiculoDetenidoTrasRecuperacion: e.target.checked })} />
+                        ¿Vehículo detenido tras recuperación?
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Estado del vehículo recuperado</label>
+                      <select value={form.estadoVehiculoRecuperado}
+                        disabled={!form.vehiculoRecuperado}
+                        onChange={(e) => setForm({ ...form, estadoVehiculoRecuperado: e.target.value })}
+                        className="w-full border rounded px-3 py-2 text-sm bg-white disabled:bg-slate-100">
+                        <option value="">— Sin asignar —</option>
+                        <option value="Con daños">Con daños</option>
+                        <option value="Sin daños">Sin daños</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Deducible por robo de componentes electrónicos</label>
+                      <input type="number" step="0.01" value={calcDeducibleRoboComponentesElectronicos(form) ?? ''} disabled
+                        placeholder="Falta Valor del siniestro antes de IVA"
+                        className="w-full border rounded px-3 py-2 text-sm bg-slate-100 text-slate-500" />
+                    </div>
+                  </div>
+                </div>
               )}
 
               <div>
@@ -817,7 +1899,12 @@ export function Seguimiento() {
             </div>
           )}
 
-          {/* ---------- Pestaña: Bitácora ---------- */}
+          {/* ---------- Pestaña: Bitácora ----------
+              Muestra el historial de auditoría (tabla AuditLog): quién hizo qué cambio,
+              en qué campos, y cuándo. GET /siniestros/:id/historial debe devolver un
+              arreglo de { id, accion, usuarioNombre, usuarioEmail, creadoEn, detalle }
+              donde detalle = { campos: [{ campo, antes, despues }] } (ver fragmento de
+              backend entregado aparte). */}
           {tab === 'bitacora' && (
             <div>
               {cargandoHistorial ? (
@@ -826,12 +1913,35 @@ export function Seguimiento() {
                 <p className="text-sm text-slate-500">No hay historial disponible para este siniestro.</p>
               ) : (
                 <ul className="divide-y">
-                  {historial.map((h: any) => (
-                    <li key={h.id} className="py-2 flex justify-between text-sm">
-                      <span className="text-slate-700">{h.estatusNombre || h.descripcion}</span>
-                      <span className="text-slate-400">{formatFecha(h.fecha || h.createdAt)}</span>
-                    </li>
-                  ))}
+                  {historial.map((h: any) => {
+                    const campos: any[] = h.detalle?.campos || [];
+                    return (
+                      <li key={h.id} className="py-3 text-sm">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium text-slate-700">
+                              {ETIQUETAS_ACCION[h.accion] || h.accion}
+                            </span>
+                            <span className="text-slate-400"> — por </span>
+                            <span className="text-slate-700">{h.usuarioNombre || h.usuarioEmail || 'Sistema'}</span>
+                          </div>
+                          <span className="text-slate-400 text-xs whitespace-nowrap ml-3">
+                            {formatFechaHora(h.creadoEn) || '—'}
+                          </span>
+                        </div>
+                        {campos.length > 0 && (
+                          <ul className="mt-1.5 space-y-0.5 text-xs text-slate-500">
+                            {campos.map((c, i) => (
+                              <li key={i}>
+                                <span className="font-medium text-slate-600">{etiquetaCampo(c.campo)}:</span>{' '}
+                                {formatValorAuditoria(c.antes)} → {formatValorAuditoria(c.despues)}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

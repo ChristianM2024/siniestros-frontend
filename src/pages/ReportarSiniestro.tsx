@@ -9,6 +9,12 @@ type TipoDocumento =
   | 'croquis'
   | 'acta_policial';
 
+// Offset fijo de Ecuador (no usa horario de verano, así que es seguro fijarlo)
+const OFFSET_ECUADOR = '-05:00';
+
+const HORAS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTOS = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
 const DOCUMENTOS_REQUERIDOS: { tipo: TipoDocumento; label: string; accept: string }[] = [
   { tipo: 'foto_siniestro', label: 'Foto del siniestro', accept: 'image/*' },
   { tipo: 'foto_vehiculo', label: 'Foto del vehiculo', accept: 'image/*' },
@@ -28,7 +34,7 @@ export function ReportarSiniestro() {
 
   const [form, setForm] = useState({
     fechaSiniestro: '',
-    horaSiniestro: '',
+    horaSiniestro: '', // 'HH:MM' en 24h, armado desde los selects de Hora/Minuto
     conductor: '',
     cedulaConductor: '',
     telConductor: '',
@@ -45,6 +51,17 @@ export function ReportarSiniestro() {
   });
 
   const [ciudades, setCiudades] = useState<{ id: number; nombre: string }[]>([]);
+
+  // El valor combinado 'HH:MM' se arma desde los dos selects (Hora/Minuto).
+  const [horaH, horaM] = form.horaSiniestro.split(':');
+
+  function actualizarHora(h: string) {
+    setForm((f) => ({ ...f, horaSiniestro: h && horaM ? `${h}:${horaM}` : h ? `${h}:00` : '' }));
+  }
+
+  function actualizarMinuto(m: string) {
+    setForm((f) => ({ ...f, horaSiniestro: m ? `${horaH || '00'}:${m}` : (horaH ? `${horaH}:00` : '') }));
+  }
 
   useEffect(() => {
     api.get('/ciudades').then(({ data }) => setCiudades(data)).catch(() => setCiudades([]));
@@ -68,10 +85,13 @@ export function ReportarSiniestro() {
       return;
     }
 
-    // Combina fecha + hora en un solo datetime para fechaSiniestro
+    // Combina fecha + hora en un solo datetime ISO para fechaSiniestro.
+    // Se fija el offset de Ecuador (-05:00) explícitamente para que el backend
+    // (y cualquier reporte que lea esta fecha) no la interprete como UTC ni
+    // como hora local del servidor.
     const fechaHora = form.horaSiniestro
-      ? `${form.fechaSiniestro}T${form.horaSiniestro}`
-      : form.fechaSiniestro;
+      ? `${form.fechaSiniestro}T${form.horaSiniestro}:00${OFFSET_ECUADOR}`
+      : `${form.fechaSiniestro}T00:00:00${OFFSET_ECUADOR}`;
 
     try {
       const { data } = await api.post('/siniestros', {
@@ -184,9 +204,25 @@ export function ReportarSiniestro() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Hora</label>
-                <input type="time" value={form.horaSiniestro}
-                  onChange={(e) => setForm({ ...form, horaSiniestro: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm" />
+                <div className="flex items-center gap-2">
+                  <select value={horaH || ''}
+                    onChange={(e) => actualizarHora(e.target.value)}
+                    className="w-full border rounded px-3 py-2 text-sm bg-white">
+                    <option value="">Hora</option>
+                    {HORAS.map((h) => (
+                      <option key={h} value={h}>{h}</option>
+                    ))}
+                  </select>
+                  <span className="text-slate-400">:</span>
+                  <select value={horaM || ''}
+                    onChange={(e) => actualizarMinuto(e.target.value)}
+                    className="w-full border rounded px-3 py-2 text-sm bg-white">
+                    <option value="">Min.</option>
+                    {MINUTOS.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Lugar *</label>
